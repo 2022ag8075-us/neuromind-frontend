@@ -19,6 +19,7 @@ import {
   UIManager,
   Image,
   Alert,
+  SafeAreaView,
 } from "react-native";
 
 import { LinearGradient } from "expo-linear-gradient";
@@ -32,12 +33,12 @@ import ChatBubble from "../components/ChatBubble";
 import { useAuth } from "../context/AuthContext";
 import { useChat } from "../context/ChatContext";
 
-/* ============================== */
+// Enable layout animations on Android
 if (Platform.OS === "android") {
   UIManager.setLayoutAnimationEnabledExperimental?.(true);
 }
 
-/* ============================== */
+// ---------- Types ----------
 type Status = "sending" | "sent" | "error";
 
 interface Message {
@@ -48,7 +49,9 @@ interface Message {
   status?: Status;
 }
 
-/* ============================== */
+type ImageAsset = ImagePicker.ImagePickerAsset;
+
+// ---------- Helpers ----------
 const getTime = () =>
   new Date().toLocaleTimeString([], {
     hour: "2-digit",
@@ -58,7 +61,7 @@ const getTime = () =>
 const generateId = () =>
   `${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
-/* ============================== */
+// ---------- Component ----------
 export default function ChatScreen({ navigation }: any) {
   const { logout } = useAuth();
   const { activeSessionId, selectSession } = useChat();
@@ -68,15 +71,24 @@ export default function ChatScreen({ navigation }: any) {
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(false);
 
-  const [image, setImage] = useState<any>(null);
-  const [recording, setRecording] =
-    useState<Audio.Recording | null>(null);
+  const [image, setImage] = useState<ImageAsset | null>(null);
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
 
   const flatListRef = useRef<FlatList>(null);
   const isMounted = useRef(true);
   const currentSessionRef = useRef<string | null>(null);
 
-  /* ============================== */
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+      // Stop & discard any ongoing recording
+      if (recording) {
+        recording.stopAndUnloadAsync().catch(() => {});
+      }
+    };
+  }, [recording]);
+
   const safeSetChat = useCallback(
     (fn: (prev: Message[]) => Message[]) => {
       if (!isMounted.current) return;
@@ -85,20 +97,13 @@ export default function ChatScreen({ navigation }: any) {
     []
   );
 
-  useEffect(() => {
-    return () => {
-      isMounted.current = false;
-    };
-  }, []);
-
-  /* ============================== */
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     });
   };
 
-  /* ============================== */
+  // ---------- Load chat history ----------
   const loadMessages = useCallback(async () => {
     if (!activeSessionId) return;
 
@@ -106,129 +111,115 @@ export default function ChatScreen({ navigation }: any) {
     setInitialLoading(true);
 
     try {
-      const res = await API.get(
-        `/chat/messages/${activeSessionId}`
-      );
+      const res = await API.get(`/chat/messages/${activeSessionId}`);
+      if (currentSessionRef.current !== activeSessionId) return;
 
-      // prevent race overwrite
-      if (currentSessionRef.current !== activeSessionId)
-        return;
+      const raw = Array.isArray(res.data?.data) ? res.data.data : [];
 
-      const raw = Array.isArray(res.data?.data)
-        ? res.data.data
-        : [];
-
-      // ✅ sort messages properly
       const sorted = raw.sort(
         (a: any, b: any) =>
           new Date(a.createdAt || 0).getTime() -
           new Date(b.createdAt || 0).getTime()
       );
 
-      // ✅ stable IDs (NO _id in schema)
-      const formatted: Message[] = sorted.map(
-        (m: any, index: number) => ({
-          id: `${m.createdAt || Date.now()}_${index}`,
-          text: m.content || "",
-          isUser: m.role === "user",
-          time: new Date(
-            m.createdAt || Date.now()
-          ).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-        })
-      );
+      const formatted: Message[] = sorted.map((m: any, index: number) => ({
+        id: `${m.createdAt || Date.now()}_${index}`,
+        text: m.content || "",
+        isUser: m.role === "user",
+        time: new Date(m.createdAt || Date.now()).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      }));
 
       safeSetChat(() => formatted);
-    } catch {
-      Alert.alert("Error", "Failed to load chats");
+    } catch (error) {
+      console.error("Load messages error:", error);
+      Alert.alert("Error", "Failed to load chat history");
     } finally {
       setInitialLoading(false);
     }
-  }, [activeSessionId]);
+  }, [activeSessionId, safeSetChat]);
 
   useEffect(() => {
     loadMessages();
   }, [loadMessages]);
 
-  /* ============================== */
   useEffect(() => {
     if (chat.length > 0) scrollToBottom();
   }, [chat]);
 
-  /* ============================== */
+  // ---------- Image picker ----------
   const pickImage = async () => {
     try {
-      const res =
-        await ImagePicker.launchImageLibraryAsync({
-          mediaTypes:
-            ImagePicker.MediaTypeOptions.Images,
-          quality: 0.7,
-        });
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.7,
+      });
 
-      if (!res.canceled && res.assets?.length) {
-        setImage(res.assets[0]);
+      if (!result.canceled && result.assets?.length) {
+        setImage(result.assets[0]);
       }
-    } catch {
-      Alert.alert("Error", "Image pick failed");
+    } catch (error) {
+      console.error("Image pick error:", error);
+      Alert.alert("Error", "Could not pick image");
     }
   };
 
-  /* ============================== */
+  // ---------- Audio recording ----------
   const startRecording = async () => {
     try {
-      const perm =
-        await Audio.requestPermissionsAsync();
-
-      if (!perm.granted) {
-        Alert.alert("Permission required");
+      const { granted } = await Audio.requestPermissionsAsync();
+      if (!granted) {
+        Alert.alert("Permission required", "Microphone access is needed for voice messages");
         return;
       }
 
-      const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(
+      const { recording: newRecording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
-
-      await rec.startAsync();
-      setRecording(rec);
-    } catch {}
+      setRecording(newRecording);
+    } catch (error) {
+      console.error("Start recording error:", error);
+      Alert.alert("Error", "Could not start recording");
+    }
   };
 
   const stopRecording = async () => {
-    try {
-      if (!recording) return;
+    if (!recording) return;
 
+    try {
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
-
       setRecording(null);
 
-      if (uri) sendMessage("", uri, null);
-    } catch {}
+      if (uri) {
+        sendMessage("", uri, null);
+      }
+    } catch (error) {
+      console.error("Stop recording error:", error);
+      Alert.alert("Error", "Failed to process voice message");
+    }
   };
 
-  /* ============================== */
+  // ---------- Send message (text, image, voice) ----------
   const sendMessage = async (
     text: string,
     audioUri?: string | null,
-    imageObj?: any
+    imageObj?: ImageAsset | null
   ) => {
     if (loading) return;
     if (!text && !audioUri && !imageObj) return;
 
-    const id = generateId();
+    const tempId = generateId();
 
-    LayoutAnimation.configureNext(
-      LayoutAnimation.Presets.easeInEaseOut
-    );
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
     safeSetChat((prev) => [
       ...prev,
       {
-        id,
-        text: text || "📎 Media",
+        id: tempId,
+        text: text || (imageObj ? "📷 Image" : "🎤 Voice message"),
         isUser: true,
         time: getTime(),
         status: "sending",
@@ -238,14 +229,12 @@ export default function ChatScreen({ navigation }: any) {
     setLoading(true);
 
     try {
-      const form = new FormData();
-
-      if (text) form.append("message", text);
-      if (activeSessionId)
-        form.append("sessionId", activeSessionId);
+      const formData = new FormData();
+      if (text) formData.append("message", text);
+      if (activeSessionId) formData.append("sessionId", activeSessionId);
 
       if (audioUri) {
-        form.append("files", {
+        formData.append("files", {
           uri: audioUri,
           name: "audio.m4a",
           type: "audio/m4a",
@@ -253,35 +242,25 @@ export default function ChatScreen({ navigation }: any) {
       }
 
       if (imageObj) {
-        form.append("files", {
+        formData.append("files", {
           uri: imageObj.uri,
           name: "image.jpg",
           type: "image/jpeg",
         } as any);
       }
 
-      const res = await API.post(
-        "/ai/unified-chat",
-        form,
-        {
-          headers: {
-            "Content-Type":
-              "multipart/form-data",
-          },
-        }
-      );
+      const response = await API.post("/ai/unified-chat", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
 
-      const reply =
-        res.data?.reply || "I'm here for you.";
+      const reply = response.data?.reply || "I'm here for you.";
 
+      // Mark original message as sent
       safeSetChat((prev) =>
-        prev.map((m) =>
-          m.id === id
-            ? { ...m, status: "sent" }
-            : m
-        )
+        prev.map((msg) => (msg.id === tempId ? { ...msg, status: "sent" } : msg))
       );
 
+      // Add AI reply
       safeSetChat((prev) => [
         ...prev,
         {
@@ -292,224 +271,221 @@ export default function ChatScreen({ navigation }: any) {
         },
       ]);
 
-      // ✅ ALWAYS sync session
-      if (res.data?.sessionId) {
-        selectSession(res.data.sessionId);
+      // Sync session if backend returns a new one
+      if (response.data?.sessionId) {
+        selectSession(response.data.sessionId);
       }
 
+      // Clear selected media after successful send
       setImage(null);
-    } catch {
+    } catch (error) {
+      console.error("Send message error:", error);
       safeSetChat((prev) =>
-        prev.map((m) =>
-          m.id === id
-            ? { ...m, status: "error" }
-            : m
+        prev.map((msg) =>
+          msg.id === tempId ? { ...msg, status: "error" } : msg
         )
       );
-
-      Alert.alert("Error", "Message failed");
+      Alert.alert("Error", "Message could not be sent");
     } finally {
       setLoading(false);
     }
   };
 
   const handleSend = () => {
-    const text = message.trim();
-    if (!text && !image) return;
+    const trimmedText = message.trim();
+    if (!trimmedText && !image) return;
 
     setMessage("");
-    sendMessage(text, null, image);
+    sendMessage(trimmedText, null, image);
   };
 
-  /* ============================== */
+  // ---------- Render ----------
   return (
-    <LinearGradient
-      colors={["#0f172a", "#1e293b"]}
-      style={{ flex: 1 }}
-    >
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={
-          Platform.OS === "ios"
-            ? "padding"
-            : "height"
-        }
-      >
-        <BlurView intensity={50} tint="dark">
-          <View style={styles.header}>
-            <TouchableOpacity
-              onPress={() =>
-                navigation.openDrawer()
-              }
-            >
-              <Text style={styles.menu}>☰</Text>
-            </TouchableOpacity>
+    <LinearGradient colors={["#0f172a", "#1e293b"]} style={styles.gradient}>
+      <SafeAreaView style={styles.safeArea}>
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+        >
+          {/* Header with Blur */}
+          <BlurView intensity={50} tint="dark" style={styles.headerBlur}>
+            <View style={styles.header}>
+              <TouchableOpacity onPress={() => navigation.openDrawer()}>
+                <Text style={styles.menu}>☰</Text>
+              </TouchableOpacity>
+              <Text style={styles.title}>NeuroMind</Text>
+              <TouchableOpacity onPress={logout}>
+                <Text style={styles.logout}>Logout</Text>
+              </TouchableOpacity>
+            </View>
+          </BlurView>
 
-            <Text style={styles.title}>
-              NeuroMind
-            </Text>
-
-            <TouchableOpacity onPress={logout}>
-              <Text style={styles.logout}>
-                Logout
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </BlurView>
-
-        {initialLoading && (
-          <View style={styles.center}>
-            <ActivityIndicator />
-          </View>
-        )}
-
-        <FlatList
-          ref={flatListRef}
-          data={chat}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <ChatBubble {...item} />
-          )}
-          contentContainerStyle={styles.chat}
-          onContentSizeChange={scrollToBottom}
-        />
-
-        {image && (
-          <View style={styles.preview}>
-            <Image
-              source={{ uri: image.uri }}
-              style={styles.previewImg}
+          {/* Chat area */}
+          {initialLoading ? (
+            <View style={styles.centerLoader}>
+              <ActivityIndicator size="large" color="#3b82f6" />
+            </View>
+          ) : (
+            <FlatList
+              ref={flatListRef}
+              data={chat}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => <ChatBubble {...item} />}
+              contentContainerStyle={styles.chatContent}
+              onContentSizeChange={scrollToBottom}
+              keyboardDismissMode="interactive"
             />
-            <TouchableOpacity
-              onPress={() => setImage(null)}
-            >
-              <Text style={styles.remove}>
-                Remove
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
+          )}
 
-        {loading && (
-          <View style={styles.typing}>
-            <ActivityIndicator />
-            <Text style={styles.typingText}>
-              AI thinking...
-            </Text>
-          </View>
-        )}
+          {/* Image preview */}
+          {image && (
+            <View style={styles.previewContainer}>
+              <Image source={{ uri: image.uri }} style={styles.previewImage} />
+              <TouchableOpacity onPress={() => setImage(null)}>
+                <Text style={styles.removeText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
-        <BlurView style={styles.inputBox} intensity={60}>
-          <TouchableOpacity onPress={pickImage}>
-            <Text style={styles.icon}>🖼</Text>
-          </TouchableOpacity>
+          {/* Typing indicator */}
+          {loading && (
+            <View style={styles.typingIndicator}>
+              <ActivityIndicator size="small" color="#3b82f6" />
+              <Text style={styles.typingText}>AI is thinking...</Text>
+            </View>
+          )}
 
-          <TouchableOpacity
-            onPress={
-              recording
-                ? stopRecording
-                : startRecording
-            }
-          >
-            <Text style={styles.icon}>
-              {recording ? "⏹" : "🎤"}
-            </Text>
-          </TouchableOpacity>
+          {/* Input bar with Blur */}
+          <BlurView intensity={80} tint="dark" style={styles.inputBlur}>
+            <View style={styles.inputContainer}>
+              <TouchableOpacity onPress={pickImage}>
+                <Text style={styles.icon}>🖼️</Text>
+              </TouchableOpacity>
 
-          <TextInput
-            value={message}
-            onChangeText={setMessage}
-            placeholder="Type..."
-            placeholderTextColor="#aaa"
-            style={styles.input}
-          />
+              <TouchableOpacity onPress={recording ? stopRecording : startRecording}>
+                <Text style={styles.icon}>{recording ? "⏹️" : "🎤"}</Text>
+              </TouchableOpacity>
 
-          <TouchableOpacity onPress={handleSend}>
-            <Text style={styles.send}>➤</Text>
-          </TouchableOpacity>
-        </BlurView>
-      </KeyboardAvoidingView>
+              <TextInput
+                value={message}
+                onChangeText={setMessage}
+                placeholder="Type a message..."
+                placeholderTextColor="#aaa"
+                style={styles.input}
+                multiline
+              />
+
+              <TouchableOpacity onPress={handleSend} disabled={loading}>
+                <Text style={[styles.send, loading && styles.sendDisabled]}>➤</Text>
+              </TouchableOpacity>
+            </View>
+          </BlurView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
     </LinearGradient>
   );
 }
 
-/* ============================== */
+// ---------- Styles ----------
 const styles = StyleSheet.create({
+  gradient: { flex: 1 },
+  safeArea: { flex: 1, backgroundColor: "transparent" },
+  flex: { flex: 1 },
+
+  headerBlur: {
+    borderBottomWidth: 0.5,
+    borderBottomColor: "rgba(255,255,255,0.1)",
+  },
   header: {
-    padding: 36,
+    paddingHorizontal: 16,
+    paddingVertical: 32,
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
   },
-  menu: { color: "#fff", fontSize: 20 },
-  title: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  logout: { color: "#ef4444" },
+  menu: { color: "#fff", fontSize: 24 },
+  title: { color: "#fff", fontSize: 18, fontWeight: "bold" },
+  logout: { color: "#ef4444", fontWeight: "600" },
 
-  chat: {
-    padding: 24,
-    paddingBottom: 120,
+  chatContent: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 80,
   },
 
-  center: {
+  centerLoader: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
 
-  typing: {
+  previewContainer: {
     flexDirection: "row",
-    padding: 10,
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 12,
+  },
+  previewImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  removeText: {
+    color: "#ef4444",
+    fontWeight: "600",
   },
 
+  typingIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    marginBottom: 4,
+  },
   typingText: {
     color: "#aaa",
     marginLeft: 8,
+    fontSize: 13,
   },
 
-  inputBox: {
-    position: "absolute",
-    bottom: 0,
-    width: "98%",
+  inputBlur: {
+    borderTopWidth: 0.5,
+    borderTopColor: "rgba(255,255,255,0.1)",
+  },
+  inputContainer: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
-
   input: {
     flex: 1,
-    backgroundColor: "#111",
+    backgroundColor: "#1e293b",
     color: "#fff",
-    borderRadius: 10,
-    padding: 10,
-    marginHorizontal: 7,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginHorizontal: 8,
+    maxHeight: 100,
   },
-
   send: {
+    fontSize: 24,
     color: "#3b82f6",
-    fontSize: 22,
+    marginLeft: 4,
+    paddingHorizontal: 4,
   },
-
+  sendDisabled: {
+    opacity: 0.5,
+  },
   icon: {
-    fontSize: 20,
-    marginHorizontal: 6,
+    fontSize: 24,
     color: "#fff",
-  },
-
-  preview: {
-    padding: 10,
-  },
-
-  previewImg: {
-    width: 120,
-    height: 120,
-    borderRadius: 10,
-  },
-
-  remove: {
-    color: "#ef4444",
-    marginTop: 6,
+    paddingHorizontal: 4,
   },
 });
