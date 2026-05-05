@@ -12,19 +12,21 @@ import { Platform } from "react-native";
 /* =========================
    🌐 BASE URL
 ========================= */
-const LOCAL_IP = "192.168.0.102";
+const LOCAL_IP = "192.168.0.102"; // your laptop IP
+
 
 const getBaseURL = (): string => {
   if (__DEV__) {
     if (Platform.OS === "web") {
-      return "http://localhost:5000/api";
+      return "http://localhost:8080/api";
     }
-    return `http://${LOCAL_IP}:5000/api`;
+    return `http://${LOCAL_IP}:8080/api`;
   }
   return "https://your-production-api.com/api";
 };
 
 export const BASE_URL = getBaseURL();
+
 
 /* =========================
    ⚙️ AXIOS INSTANCE
