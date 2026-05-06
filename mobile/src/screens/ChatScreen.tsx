@@ -26,7 +26,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 
 import * as ImagePicker from "expo-image-picker";
-import { Audio } from "expo-av";
 
 import API from "../services/api";
 import ChatBubble from "../components/ChatBubble";
@@ -70,9 +69,7 @@ export default function ChatScreen({ navigation }: any) {
   const [chat, setChat] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(false);
-
   const [image, setImage] = useState<ImageAsset | null>(null);
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
 
   const flatListRef = useRef<FlatList>(null);
   const isMounted = useRef(true);
@@ -82,12 +79,8 @@ export default function ChatScreen({ navigation }: any) {
   useEffect(() => {
     return () => {
       isMounted.current = false;
-      // Stop & discard any ongoing recording
-      if (recording) {
-        recording.stopAndUnloadAsync().catch(() => {});
-      }
     };
-  }, [recording]);
+  }, []);
 
   const safeSetChat = useCallback(
     (fn: (prev: Message[]) => Message[]) => {
@@ -166,50 +159,10 @@ export default function ChatScreen({ navigation }: any) {
     }
   };
 
-  // ---------- Audio recording ----------
-  const startRecording = async () => {
-    try {
-      const { granted } = await Audio.requestPermissionsAsync();
-      if (!granted) {
-        Alert.alert("Permission required", "Microphone access is needed for voice messages");
-        return;
-      }
-
-      const { recording: newRecording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-      setRecording(newRecording);
-    } catch (error) {
-      console.error("Start recording error:", error);
-      Alert.alert("Error", "Could not start recording");
-    }
-  };
-
-  const stopRecording = async () => {
-    if (!recording) return;
-
-    try {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      setRecording(null);
-
-      if (uri) {
-        sendMessage("", uri, null);
-      }
-    } catch (error) {
-      console.error("Stop recording error:", error);
-      Alert.alert("Error", "Failed to process voice message");
-    }
-  };
-
-  // ---------- Send message (text, image, voice) ----------
-  const sendMessage = async (
-    text: string,
-    audioUri?: string | null,
-    imageObj?: ImageAsset | null
-  ) => {
+  // ---------- Send message (text, image) ----------
+  const sendMessage = async (text: string, imageObj?: ImageAsset | null) => {
     if (loading) return;
-    if (!text && !audioUri && !imageObj) return;
+    if (!text && !imageObj) return;
 
     const tempId = generateId();
 
@@ -219,7 +172,7 @@ export default function ChatScreen({ navigation }: any) {
       ...prev,
       {
         id: tempId,
-        text: text || (imageObj ? "📷 Image" : "🎤 Voice message"),
+        text: text || (imageObj ? "📷 Image" : ""),
         isUser: true,
         time: getTime(),
         status: "sending",
@@ -232,14 +185,6 @@ export default function ChatScreen({ navigation }: any) {
       const formData = new FormData();
       if (text) formData.append("message", text);
       if (activeSessionId) formData.append("sessionId", activeSessionId);
-
-      if (audioUri) {
-        formData.append("files", {
-          uri: audioUri,
-          name: "audio.m4a",
-          type: "audio/m4a",
-        } as any);
-      }
 
       if (imageObj) {
         formData.append("files", {
@@ -276,7 +221,7 @@ export default function ChatScreen({ navigation }: any) {
         selectSession(response.data.sessionId);
       }
 
-      // Clear selected media after successful send
+      // Clear selected image after successful send
       setImage(null);
     } catch (error) {
       console.error("Send message error:", error);
@@ -296,7 +241,7 @@ export default function ChatScreen({ navigation }: any) {
     if (!trimmedText && !image) return;
 
     setMessage("");
-    sendMessage(trimmedText, null, image);
+    sendMessage(trimmedText, image);
   };
 
   // ---------- Render ----------
@@ -363,10 +308,6 @@ export default function ChatScreen({ navigation }: any) {
                 <Text style={styles.icon}>🖼️</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity onPress={recording ? stopRecording : startRecording}>
-                <Text style={styles.icon}>{recording ? "⏹️" : "🎤"}</Text>
-              </TouchableOpacity>
-
               <TextInput
                 value={message}
                 onChangeText={setMessage}
@@ -399,7 +340,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 16,
-    paddingVertical: 32,
+    paddingVertical: 34,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",

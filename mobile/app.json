@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "d1334c4e-504c-4427-ac66-2aadb0810dc3"
+      }
+    },
+    "android": {
+      "package": "com.neuromind.app"
+    }
+  }
+}
