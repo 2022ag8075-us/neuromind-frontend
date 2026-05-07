@@ -27,6 +27,7 @@
     "expo-haptics": "~15.0.8",
     "expo-image-picker": "~17.0.11",
     "expo-linear-gradient": "~15.0.8",
+    "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
     "lru-cache": "^11.3.5",
     "metro-runtime": "^0.84.4",

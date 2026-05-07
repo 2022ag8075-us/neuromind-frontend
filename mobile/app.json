@@ -1,15 +1,43 @@
 {
   "expo": {
+    "name": "Neuromind AI",
+    "slug": "neuromind-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.neuromind.app"
+    },
+    "android": {
+      "package": "com.neuromind.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#0F172A"
+      }
+    },
     "extra": {
       "eas": {
         "projectId": "d1334c4e-504c-4427-ac66-2aadb0810dc3"
       }
     },
-    "android": {
-      "package": "com.neuromind.app"
-    },
     "plugins": [
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "backgroundColor": "#0F172A",
+          "imageWidth": 200
+        }
+      ]
     ]
   }
 }
