@@ -65,128 +65,111 @@ const ChatContext = createContext<ChatContextType | null>(null);
 /* ==============================
    PROVIDER
 ============================== */
-export const ChatProvider = ({
-  children,
-}: {
-  children: React.ReactNode;
-}) => {
+export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
   const { isAuth, logout } = useAuth();
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isMounted = useRef(true);
   const isFetching = useRef(false);
   const retryCount = useRef(0);
-
   const offlineQueue = useRef<OfflineMessage[]>([]);
 
-  /* ==============================
-     🧠 CACHE LOAD
-  ============================== */
-  const loadCache = async () => {
+  // ---------- Cache Helpers (stabilized with useCallback) ----------
+  const saveCache = useCallback(
+    async (nextSessions: Session[], nextActive: string | null) => {
+      try {
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({
+            sessions: nextSessions,
+            activeSessionId: nextActive,
+          })
+        );
+      } catch (error) {
+        console.warn("Failed to save sessions cache", error);
+      }
+    },
+    []
+  );
+
+  const saveQueue = useCallback(async () => {
+    try {
+      await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(offlineQueue.current));
+    } catch (error) {
+      console.warn("Failed to save offline queue", error);
+    }
+  }, []);
+
+  const loadCache = useCallback(async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        setSessions(parsed.sessions || []);
-        setActiveSessionId(parsed.activeSessionId || null);
+        if (isMounted.current) {
+          setSessions(parsed.sessions || []);
+          setActiveSessionId(parsed.activeSessionId || null);
+        }
       }
 
       const queueRaw = await AsyncStorage.getItem(QUEUE_KEY);
-      if (queueRaw) {
+      if (queueRaw && isMounted.current) {
         offlineQueue.current = JSON.parse(queueRaw);
       }
-    } catch {}
-  };
+    } catch (error) {
+      console.warn("Failed to load cache", error);
+    }
+  }, []);
 
-  /* ==============================
-     💾 CACHE SAVE
-  ============================== */
-  const saveCache = async (
-    nextSessions: Session[],
-    nextActive: string | null
-  ) => {
-    try {
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          sessions: nextSessions,
-          activeSessionId: nextActive,
-        })
-      );
-    } catch {}
-  };
-
-  /* ==============================
-     📤 SAVE QUEUE
-  ============================== */
-  const saveQueue = async () => {
-    try {
-      await AsyncStorage.setItem(
-        QUEUE_KEY,
-        JSON.stringify(offlineQueue.current)
-      );
-    } catch {}
-  };
-
-  /* ==============================
-     📡 PROCESS OFFLINE QUEUE
-  ============================== */
+  // ---------- Offline Queue Processing ----------
   const processQueue = useCallback(async () => {
     if (!offlineQueue.current.length) return;
 
     const queueCopy = [...offlineQueue.current];
-
     for (const item of queueCopy) {
       try {
         await API.post("/ai/unified-chat", item.payload);
-
-        offlineQueue.current = offlineQueue.current.filter(
-          (q) => q.id !== item.id
-        );
+        offlineQueue.current = offlineQueue.current.filter((q) => q.id !== item.id);
       } catch {
         item.retries++;
-
         if (item.retries > 3) {
-          offlineQueue.current = offlineQueue.current.filter(
-            (q) => q.id !== item.id
-          );
+          offlineQueue.current = offlineQueue.current.filter((q) => q.id !== item.id);
         }
       }
     }
+    await saveQueue();
+  }, [saveQueue]);
 
-    saveQueue();
-  }, []);
+  const enqueueOffline = useCallback(
+    async (msg: OfflineMessage) => {
+      offlineQueue.current.push(msg);
+      await saveQueue();
+    },
+    [saveQueue]
+  );
 
-  /* ==============================
-     ➕ ADD OFFLINE MESSAGE
-  ============================== */
-  const enqueueOffline = useCallback((msg: OfflineMessage) => {
-    offlineQueue.current.push(msg);
-    saveQueue();
-  }, []);
-
-  /* ==============================
-     🔄 SORT
-  ============================== */
+  // ---------- Sorting ----------
   const sortSessions = (list: Session[]) =>
     [...list].sort((a, b) => {
       if (a.pinned && !b.pinned) return -1;
       if (!a.pinned && b.pinned) return 1;
-
       return (
-        new Date(b.updatedAt || 0).getTime() -
-        new Date(a.updatedAt || 0).getTime()
+        new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
       );
     });
 
-  /* ==============================
-     📥 FETCH SESSIONS
-  ============================== */
+  // ---------- Clear Everything (used on logout) ----------
+  const clearSessions = useCallback(async () => {
+    setSessions([]);
+    setActiveSessionId(null);
+    offlineQueue.current = [];
+    await AsyncStorage.multiRemove([STORAGE_KEY, QUEUE_KEY]);
+  }, []);
+
+  // ---------- Fetch Sessions from API ----------
   const fetchSessions = useCallback(
     async (silent = false) => {
       if (!isAuth || isFetching.current) return;
@@ -197,16 +180,13 @@ export const ChatProvider = ({
 
       try {
         const res = await API.get("/chat/sessions");
-
-        const incoming: Session[] = (res.data?.data || []).map(
-          (s: any) => ({
-            sessionId: s.sessionId,
-            title: s.title || "New Chat",
-            lastMessage: s.lastMessage || "",
-            updatedAt: s.updatedAt,
-            pinned: s.pinned || false,
-          })
-        );
+        const incoming: Session[] = (res.data?.data || []).map((s: any) => ({
+          sessionId: s.sessionId,
+          title: s.title || "New Chat",
+          lastMessage: s.lastMessage || "",
+          updatedAt: s.updatedAt,
+          pinned: s.pinned || false,
+        }));
 
         retryCount.current = 0;
 
@@ -214,14 +194,9 @@ export const ChatProvider = ({
 
         setSessions((prev) => {
           const map = new Map<string, Session>();
-
           [...prev, ...incoming].forEach((s) => {
-            map.set(s.sessionId, {
-              ...map.get(s.sessionId),
-              ...s,
-            });
+            map.set(s.sessionId, { ...map.get(s.sessionId), ...s });
           });
-
           const final = sortSessions(Array.from(map.values()));
           saveCache(final, activeSessionId);
           return final;
@@ -236,7 +211,6 @@ export const ChatProvider = ({
           logout();
           return;
         }
-
         if (retryCount.current < 3) {
           retryCount.current++;
           setTimeout(() => fetchSessions(true), 1000 * retryCount.current);
@@ -248,32 +222,29 @@ export const ChatProvider = ({
         if (isMounted.current) setLoading(false);
       }
     },
-    [isAuth, logout, activeSessionId]
+    [isAuth, logout, activeSessionId, saveCache]
   );
 
-  /* ==============================
-     SESSION ACTIONS
-  ============================== */
+  // ---------- Session Actions ----------
   const selectSession = useCallback((id: string | null) => {
     setActiveSessionId(id);
   }, []);
 
-  const addSession = useCallback((session: Session) => {
-    setSessions((prev) => {
-      const exists = prev.some((s) => s.sessionId === session.sessionId);
-      if (exists) return prev;
-
-      const next = sortSessions([
-        { ...session, updatedAt: new Date().toISOString() },
-        ...prev,
-      ]);
-
-      saveCache(next, session.sessionId);
-      return next;
-    });
-
-    setActiveSessionId(session.sessionId);
-  }, []);
+  const addSession = useCallback(
+    (session: Session) => {
+      setSessions((prev) => {
+        if (prev.some((s) => s.sessionId === session.sessionId)) return prev;
+        const next = sortSessions([
+          { ...session, updatedAt: new Date().toISOString() },
+          ...prev,
+        ]);
+        saveCache(next, session.sessionId);
+        return next;
+      });
+      setActiveSessionId(session.sessionId);
+    },
+    [saveCache]
+  );
 
   const updateSession = useCallback(
     (sessionId: string, lastMessage: string) => {
@@ -281,86 +252,72 @@ export const ChatProvider = ({
         const next = sortSessions(
           prev.map((s) =>
             s.sessionId === sessionId
-              ? {
-                  ...s,
-                  lastMessage,
-                  updatedAt: new Date().toISOString(),
-                }
+              ? { ...s, lastMessage, updatedAt: new Date().toISOString() }
               : s
           )
         );
-
         saveCache(next, activeSessionId);
         return next;
       });
     },
-    [activeSessionId]
+    [activeSessionId, saveCache]
   );
 
-  const togglePinSession = useCallback((sessionId: string) => {
-    setSessions((prev) => {
-      const next = sortSessions(
-        prev.map((s) =>
-          s.sessionId === sessionId
-            ? { ...s, pinned: !s.pinned }
-            : s
-        )
-      );
+  const togglePinSession = useCallback(
+    (sessionId: string) => {
+      setSessions((prev) => {
+        const next = sortSessions(
+          prev.map((s) =>
+            s.sessionId === sessionId ? { ...s, pinned: !s.pinned } : s
+          )
+        );
+        saveCache(next, activeSessionId);
+        return next;
+      });
+    },
+    [activeSessionId, saveCache]
+  );
 
-      saveCache(next, activeSessionId);
-      return next;
-    });
-  }, [activeSessionId]);
+  const removeSession = useCallback(
+    (sessionId: string) => {
+      setSessions((prev) => {
+        const next = prev.filter((s) => s.sessionId !== sessionId);
+        saveCache(next, activeSessionId);
+        return next;
+      });
+      setActiveSessionId((prev) => (prev === sessionId ? null : prev));
+    },
+    [activeSessionId, saveCache]
+  );
 
-  const removeSession = useCallback((sessionId: string) => {
-    setSessions((prev) => {
-      const next = prev.filter((s) => s.sessionId !== sessionId);
-      saveCache(next, activeSessionId);
-      return next;
-    });
-
-    setActiveSessionId((prev) =>
-      prev === sessionId ? null : prev
-    );
-  }, [activeSessionId]);
-
-  const clearSessions = useCallback(() => {
-    setSessions([]);
-    setActiveSessionId(null);
-    AsyncStorage.removeItem(STORAGE_KEY);
-  }, []);
-
-  /* ==============================
-     INIT
-  ============================== */
+  // ---------- Effects ----------
   useEffect(() => {
     isMounted.current = true;
 
-    loadCache();
-
-    if (isAuth) {
-      fetchSessions();
-      processQueue();
-    } else {
-      clearSessions();
-    }
+    const init = async () => {
+      await loadCache();
+      if (isAuth) {
+        await fetchSessions();
+        await processQueue();
+      } else {
+        await clearSessions();
+      }
+    };
+    init();
 
     return () => {
       isMounted.current = false;
       isFetching.current = false;
     };
-  }, [isAuth]);
+  }, [isAuth, loadCache, fetchSessions, processQueue, clearSessions]);
 
-  /* ==============================
-     MEMO
-  ============================== */
+  // ---------- Memoized Context Value ----------
   const value = useMemo(
     () => ({
       sessions,
       activeSessionId,
       loading,
       error,
-
       fetchSessions,
       selectSession,
       addSession,
@@ -370,14 +327,23 @@ export const ChatProvider = ({
       enqueueOffline,
       clearSessions,
     }),
-    [sessions, activeSessionId, loading, error]
+    [
+      sessions,
+      activeSessionId,
+      loading,
+      error,
+      fetchSessions,
+      selectSession,
+      addSession,
+      updateSession,
+      removeSession,
+      togglePinSession,
+      enqueueOffline,
+      clearSessions,
+    ]
   );
 
-  return (
-    <ChatContext.Provider value={value}>
-      {children}
-    </ChatContext.Provider>
-  );
+  return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 };
 
 /* ==============================
@@ -385,10 +351,8 @@ export const ChatProvider = ({
 ============================== */
 export const useChat = () => {
   const ctx = useContext(ChatContext);
-
   if (!ctx) {
     throw new Error("useChat must be used inside ChatProvider");
   }
-
   return ctx;
 };

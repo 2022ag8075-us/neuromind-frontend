@@ -8,132 +8,133 @@ import React, {
   ReactNode,
   useRef,
 } from "react";
-
 import { getToken, setToken, clearToken } from "../services/api";
 
-/**
- * ===============================
- * 🔐 TYPES
- * ===============================
- */
+// ===============================
+// 🔐 TYPES
+// ===============================
 export interface AuthContextType {
   isAuth: boolean;
   loading: boolean;
   token: string | null;
-
   login: (token: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshAuth: () => Promise<void>;
-
-  setIsAuth: React.Dispatch<React.SetStateAction<boolean>>;
+  onAuthStateChange: (callback: (isAuthenticated: boolean) => void) => () => void;
 }
 
-/**
- * ===============================
- * 🧠 CONTEXT
- * ===============================
- */
+// ===============================
+// 🧠 CONTEXT
+// ===============================
 const AuthContext = createContext<AuthContextType | null>(null);
 
-/**
- * ===============================
- * 🧩 PROVIDER
- * ===============================
- */
+// ===============================
+// 🧩 PROVIDER
+// ===============================
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isAuth, setIsAuth] = useState(false);
   const [loading, setLoading] = useState(true);
   const [token, setTokenState] = useState<string | null>(null);
 
   const isMounted = useRef(true);
+  const authChangeListeners = useRef<Set<(isAuth: boolean) => void>>(new Set());
 
-  /**
-   * ===============================
-   * 🔄 REFRESH AUTH STATE
-   * ===============================
-   */
+  const notifyAuthChange = useCallback((authState: boolean) => {
+    authChangeListeners.current.forEach(listener => {
+      try { listener(authState); } catch (e) { console.warn("Listener error", e); }
+    });
+  }, []);
+
+  const onAuthStateChange = useCallback((callback: (isAuthenticated: boolean) => void) => {
+    authChangeListeners.current.add(callback);
+    callback(isAuth);
+    return () => {
+      authChangeListeners.current.delete(callback);
+    };
+  }, [isAuth]);
+
   const refreshAuth = useCallback(async () => {
     try {
       const storedToken = await getToken();
-
       if (!isMounted.current) return;
 
       if (storedToken) {
         setTokenState(storedToken);
-        setIsAuth(true);
+        if (!isAuth) {
+          setIsAuth(true);
+          notifyAuthChange(true);
+        }
       } else {
         setTokenState(null);
-        setIsAuth(false);
+        if (isAuth) {
+          setIsAuth(false);
+          notifyAuthChange(false);
+        }
       }
     } catch (error) {
-      console.log("❌ Auth refresh error:", error);
-
+      console.error("❌ Auth refresh error:", error);
       if (isMounted.current) {
         setTokenState(null);
-        setIsAuth(false);
+        if (isAuth) {
+          setIsAuth(false);
+          notifyAuthChange(false);
+        }
       }
     } finally {
-      if (isMounted.current) {
-        setLoading(false);
-      }
+      if (isMounted.current) setLoading(false);
     }
-  }, []);
+  }, [isAuth, notifyAuthChange]);
 
-  /**
-   * ===============================
-   * 🔐 LOGIN
-   * ===============================
-   */
   const login = useCallback(async (newToken: string) => {
     try {
       await setToken(newToken);
-
       if (!isMounted.current) return;
 
       setTokenState(newToken);
-      setIsAuth(true);
+      if (!isAuth) {
+        setIsAuth(true);
+        notifyAuthChange(true);
+      }
     } catch (error) {
-      console.log("❌ Login error:", error);
+      console.error("❌ Login error:", error);
+      throw error;
     }
-  }, []);
+  }, [isAuth, notifyAuthChange]);
 
-  /**
-   * ===============================
-   * 🚪 LOGOUT
-   * ===============================
-   */
   const logout = useCallback(async () => {
     try {
       await clearToken();
-
       if (!isMounted.current) return;
 
       setTokenState(null);
-      setIsAuth(false);
+      if (isAuth) {
+        setIsAuth(false);
+        notifyAuthChange(false);
+      }
     } catch (error) {
-      console.log("❌ Logout error:", error);
+      console.error("❌ Logout error:", error);
     }
-  }, []);
+  }, [isAuth, notifyAuthChange]);
 
-  /**
-   * ===============================
-   * 🚀 INIT APP
-   * ===============================
-   */
   useEffect(() => {
     isMounted.current = true;
     refreshAuth();
 
+    // Use 'number' type for React Native / browser setTimeout
+    let interval: number | undefined;
+
+    if (token) {
+      interval = setInterval(() => {
+        refreshAuth();
+      }, 5 * 60 * 1000) as unknown as number;
+    }
+
     return () => {
       isMounted.current = false;
+      if (interval) clearInterval(interval);
     };
-  }, [refreshAuth]);
+  }, [refreshAuth, token]);
 
-  /**
-   * ===============================
-   * ⚡ MEMO VALUE
-   * ===============================
-   */
   const value = useMemo(
     () => ({
       isAuth,
@@ -142,19 +143,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       login,
       logout,
       refreshAuth,
-      setIsAuth,
+      onAuthStateChange,
     }),
-    [isAuth, loading, token, login, logout, refreshAuth]
+    [isAuth, loading, token, login, logout, refreshAuth, onAuthStateChange]
   );
-
-  /**
-   * ===============================
-   * 🧱 FAILSAFE (NEVER RETURN UNDEFINED)
-   * ===============================
-   */
-  if (!value) {
-    return null;
-  }
 
   return (
     <AuthContext.Provider value={value}>
@@ -163,17 +155,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   );
 };
 
-/**
- * ===============================
- * 🪝 HOOK (SAFE)
- * ===============================
- */
 export const useAuth = () => {
   const context = useContext(AuthContext);
-
   if (!context) {
     throw new Error("useAuth must be used within AuthProvider");
   }
-
   return context;
 };
