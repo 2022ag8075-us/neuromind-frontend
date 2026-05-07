@@ -22,7 +22,7 @@ const getBaseURL = (): string => {
     }
     return `http://${LOCAL_IP}:8080/api`;
   }
-  return "https://neuromind-ai-production-49c7.up.railway.app";
+  return "https://neuromind-ai-production-49c7.up.railway.app/api";
 };
 
 export const BASE_URL = getBaseURL();
