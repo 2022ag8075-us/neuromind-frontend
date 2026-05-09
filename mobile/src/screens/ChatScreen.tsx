@@ -60,6 +60,16 @@ const getTime = () => new Date().toLocaleTimeString([], { hour: "2-digit", minut
 const generateId = () => `${Date.now()}_${Math.random().toString(36).slice(2)}`;
 const PINNED_KEY = "@pinned_messages";
 
+// Helper function that does not change across renders
+const loadPinnedMap = async (): Promise<Record<string, boolean>> => {
+  try {
+    const raw = await AsyncStorage.getItem(PINNED_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+
 export default function ChatScreen({ navigation }: any) {
   const { logout } = useAuth();
   const { activeSessionId, selectSession, createNewSession, addSession } = useChat();
@@ -89,42 +99,62 @@ export default function ChatScreen({ navigation }: any) {
 
   const scrollToBottom = () => requestAnimationFrame(() => flatListRef.current?.scrollToEnd({ animated: true }));
 
+  // --- Load messages – stable callback ---
   const loadMessages = useCallback(async () => {
-    if (!activeSessionId) return;
+    if (!activeSessionId) {
+      // No active session → clear any stale chat
+      safeSetChat(() => []);
+      return;
+    }
+    if (currentSessionRef.current === activeSessionId) return; // avoid duplicate loads
     currentSessionRef.current = activeSessionId;
     setInitialLoading(true);
     try {
+      console.log(`📥 Loading messages for session: ${activeSessionId}`);
       const res = await API.get(`/chat/messages/${activeSessionId}`);
       if (currentSessionRef.current !== activeSessionId) return;
-      const raw = Array.isArray(res.data?.data) ? res.data.data : [];
-      const sorted = raw.sort((a: any, b: any) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+      // Support both res.data.data and res.data.messages
+      let raw = res.data?.data;
+      if (!Array.isArray(raw)) raw = res.data?.messages;
+      if (!Array.isArray(raw)) raw = [];
+      
+      const sorted = raw.sort(
+        (a: any, b: any) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+      );
       const formatted: Message[] = sorted.map((m: any, idx: number) => ({
         id: `${m.createdAt || Date.now()}_${idx}`,
         text: m.content || "",
         isUser: m.role === "user",
         time: new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       }));
-      // Load pinned status from local storage
       const pinnedMap = await loadPinnedMap();
       const withPins = formatted.map(msg => ({ ...msg, pinned: !!pinnedMap[msg.id] }));
       safeSetChat(() => withPins);
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Load messages error:", error?.message);
       Alert.alert("Error", "Failed to load chat history");
     } finally {
-      setInitialLoading(false);
+      if (isMounted.current) setInitialLoading(false);
     }
   }, [activeSessionId, safeSetChat]);
 
-  const loadPinnedMap = async () => {
-    try {
-      const raw = await AsyncStorage.getItem(PINNED_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch { return {}; }
-  };
+  // Reload when session changes
+  useEffect(() => {
+    loadMessages();
+  }, [loadMessages]);
 
-  useEffect(() => { loadMessages(); }, [loadMessages]);
-  useEffect(() => { if (chat.length) scrollToBottom(); }, [chat]);
+  // Clear chat when session becomes null
+  useEffect(() => {
+    if (!activeSessionId) {
+      safeSetChat(() => []);
+    }
+  }, [activeSessionId, safeSetChat]);
 
+  useEffect(() => {
+    if (chat.length) scrollToBottom();
+  }, [chat]);
+
+  // ---------- Other functions (image picker, send, etc.) remain unchanged ----------
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
     if (!result.canceled && result.assets?.length) setImage(result.assets[0]);
@@ -174,14 +204,14 @@ export default function ChatScreen({ navigation }: any) {
     sendMessage(trimmed, image);
   };
 
-  // --- Clipboard ---
+  // --- Clipboard & Haptics ---
   const copyToClipboard = async (text: string) => {
     await Clipboard.setStringAsync(text);
     if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Alert.alert('Copied', 'Message copied to clipboard');
   };
 
-  // --- Delete message (local only) ---
+  // --- Delete message ---
   const deleteMessage = (messageId: string) => {
     Alert.alert("Delete message", "Are you sure? This only removes it from this device.", [
       { text: "Cancel", style: "cancel" },
@@ -189,13 +219,12 @@ export default function ChatScreen({ navigation }: any) {
     ]);
   };
 
-  // --- Pin / Unpin message (local only) ---
+  // --- Pin / Unpin ---
   const togglePin = async (message: Message) => {
     const newPinned = !message.pinned;
     safeSetChat(prev => prev.map(m => m.id === message.id ? { ...m, pinned: newPinned } : m));
     try {
-      const existing = await AsyncStorage.getItem(PINNED_KEY);
-      let pinnedMap = existing ? JSON.parse(existing) : {};
+      const pinnedMap = await loadPinnedMap();
       if (newPinned) pinnedMap[message.id] = true;
       else delete pinnedMap[message.id];
       await AsyncStorage.setItem(PINNED_KEY, JSON.stringify(pinnedMap));
@@ -215,7 +244,7 @@ export default function ChatScreen({ navigation }: any) {
     await sendMessage(userMessageText, null, aiMessageId);
   };
 
-  // --- Voice input (record and send to backend STT – placeholder) ---
+  // --- Voice (placeholder) ---
   const startRecording = async () => {
     try {
       const { granted } = await Audio.requestPermissionsAsync();
@@ -235,8 +264,7 @@ export default function ChatScreen({ navigation }: any) {
     try {
       await recordingRef.current.stopAndUnloadAsync();
       const uri = recordingRef.current.getURI();
-      // TODO: send URI to backend STT endpoint
-      Alert.alert("Voice note", `Recorded audio. STT not integrated yet – you can implement it.`);
+      Alert.alert("Voice note", `Recorded audio. STT not integrated.`);
     } catch (err) { console.error(err); }
     recordingRef.current = null;
   };
@@ -248,17 +276,12 @@ export default function ChatScreen({ navigation }: any) {
     return chat.filter(m => m.text.toLowerCase().includes(q));
   }, [chat, searchQuery]);
 
-  // --- New Chat (using createNewSession from context) ---
+  // --- New Chat ---
   const handleNewChat = async () => {
     if (createNewSession) {
       const newId = await createNewSession();
-      if (newId) {
-        // Optionally navigate to the new session – already active because selectSession inside createNewSession
-        // Just clear local messages (they will reload when activeSessionId changes)
-        safeSetChat(() => []);
-      }
+      if (newId) safeSetChat(() => []);
     } else {
-      // Fallback: direct session creation (for safety)
       const newId = `local_${Date.now()}`;
       addSession({ sessionId: newId, title: "New Chat", lastMessage: "", updatedAt: new Date().toISOString() });
       selectSession(newId);
@@ -266,7 +289,7 @@ export default function ChatScreen({ navigation }: any) {
     }
   };
 
-  // --- Render message with long‑press menu ---
+  // --- Render message ---
   const renderMessage = ({ item, index }: { item: Message; index: number }) => {
     if (item.isUser) {
       return <ChatBubble text={item.text} isUser time={item.time} status={item.status} />;
@@ -286,7 +309,6 @@ export default function ChatScreen({ navigation }: any) {
           { cancelable: true }
         );
       };
-
       return (
         <TouchableOpacity onLongPress={handleLongPress} activeOpacity={0.7} disabled={item.isRegenerating}>
           <View style={styles.aiMessageContainer}>
@@ -349,7 +371,15 @@ export default function ChatScreen({ navigation }: any) {
           {initialLoading ? (
             <View style={styles.centerLoader}><ActivityIndicator size="large" color="#3b82f6" /></View>
           ) : (
-            <FlatList ref={flatListRef} data={filteredChat} keyExtractor={(item) => item.id} renderItem={renderMessage} contentContainerStyle={styles.chatContent} onContentSizeChange={scrollToBottom} keyboardDismissMode="interactive" />
+            <FlatList
+              ref={flatListRef}
+              data={filteredChat}
+              keyExtractor={(item) => item.id}
+              renderItem={renderMessage}
+              contentContainerStyle={styles.chatContent}
+              onContentSizeChange={scrollToBottom}
+              keyboardDismissMode="interactive"
+            />
           )}
 
           {image && (
