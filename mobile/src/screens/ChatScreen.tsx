@@ -26,6 +26,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import * as ImagePicker from "expo-image-picker";
 import Markdown from 'react-native-markdown-display';
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
 
 import API from "../services/api";
 import ChatBubble from "../components/ChatBubble";
@@ -47,6 +49,7 @@ interface Message {
   isUser: boolean;
   time: string;
   status?: Status;
+  isRegenerating?: boolean; // for UI feedback
 }
 
 type ImageAsset = ImagePicker.ImagePickerAsset;
@@ -71,6 +74,7 @@ export default function ChatScreen({ navigation }: any) {
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(false);
   const [image, setImage] = useState<ImageAsset | null>(null);
+  const [regeneratingMessageId, setRegeneratingMessageId] = useState<string | null>(null);
 
   const flatListRef = useRef<FlatList>(null);
   const isMounted = useRef(true);
@@ -161,24 +165,28 @@ export default function ChatScreen({ navigation }: any) {
   };
 
   // ---------- Send message (text, image) ----------
-  const sendMessage = async (text: string, imageObj?: ImageAsset | null) => {
+  const sendMessage = async (text: string, imageObj?: ImageAsset | null, replaceAiMessageId?: string | null) => {
     if (loading) return;
     if (!text && !imageObj) return;
 
     const tempId = generateId();
+    let userMessageAdded = false;
 
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-
-    safeSetChat((prev) => [
-      ...prev,
-      {
-        id: tempId,
-        text: text || (imageObj ? "📷 Image" : ""),
-        isUser: true,
-        time: getTime(),
-        status: "sending",
-      },
-    ]);
+    // If we are replacing an AI message, we don't add a new user message.
+    if (!replaceAiMessageId) {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      safeSetChat((prev) => [
+        ...prev,
+        {
+          id: tempId,
+          text: text || (imageObj ? "📷 Image" : ""),
+          isUser: true,
+          time: getTime(),
+          status: "sending",
+        },
+      ]);
+      userMessageAdded = true;
+    }
 
     setLoading(true);
 
@@ -201,37 +209,62 @@ export default function ChatScreen({ navigation }: any) {
 
       const reply = response.data?.reply || "I'm here for you.";
 
-      // Mark original message as sent
-      safeSetChat((prev) =>
-        prev.map((msg) => (msg.id === tempId ? { ...msg, status: "sent" } : msg))
-      );
+      if (userMessageAdded) {
+        // Mark original message as sent
+        safeSetChat((prev) =>
+          prev.map((msg) => (msg.id === tempId ? { ...msg, status: "sent" } : msg))
+        );
 
-      // Add AI reply
-      safeSetChat((prev) => [
-        ...prev,
-        {
-          id: generateId(),
-          text: reply,
-          isUser: false,
-          time: getTime(),
-        },
-      ]);
+        // Add AI reply
+        safeSetChat((prev) => [
+          ...prev,
+          {
+            id: generateId(),
+            text: reply,
+            isUser: false,
+            time: getTime(),
+          },
+        ]);
+      } else if (replaceAiMessageId) {
+        // Update the AI message in place (remove regenerating flag, set new text)
+        safeSetChat((prev) =>
+          prev.map((msg) =>
+            msg.id === replaceAiMessageId
+              ? { ...msg, text: reply, time: getTime(), isRegenerating: false }
+              : msg
+          )
+        );
+        setRegeneratingMessageId(null);
+      }
 
       // Sync session if backend returns a new one
       if (response.data?.sessionId) {
         selectSession(response.data.sessionId);
       }
 
-      // Clear selected image after successful send
-      setImage(null);
+      // Clear selected image after successful send (only if new user message was added)
+      if (userMessageAdded) {
+        setImage(null);
+      }
     } catch (error) {
       console.error("Send message error:", error);
-      safeSetChat((prev) =>
-        prev.map((msg) =>
-          msg.id === tempId ? { ...msg, status: "error" } : msg
-        )
-      );
-      Alert.alert("Error", "Message could not be sent");
+      if (userMessageAdded) {
+        safeSetChat((prev) =>
+          prev.map((msg) =>
+            msg.id === tempId ? { ...msg, status: "error" } : msg
+          )
+        );
+        Alert.alert("Error", "Message could not be sent");
+      } else if (replaceAiMessageId) {
+        // On error, remove regenerating flag and keep original message unchanged
+        safeSetChat((prev) =>
+          prev.map((msg) =>
+            msg.id === replaceAiMessageId ? { ...msg, isRegenerating: false } : msg
+          )
+        );
+        setRegeneratingMessageId(null);
+        Alert.alert("Error", "Could not regenerate. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -245,7 +278,51 @@ export default function ChatScreen({ navigation }: any) {
     sendMessage(trimmedText, image);
   };
 
-  // Markdown styles (fixed with const assertion)
+  // ---------- Copy to clipboard ----------
+  const copyToClipboard = async (text: string) => {
+    await Clipboard.setStringAsync(text);
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    Alert.alert('Copied', 'Message copied to clipboard');
+  };
+
+  // ---------- Regenerate AI response ----------
+  const regenerateMessage = async (aiMessageId: string, aiIndex: number) => {
+    // Find the previous user message
+    let userMessageText = '';
+    let userMessageId = '';
+    for (let i = aiIndex - 1; i >= 0; i--) {
+      if (chat[i].isUser) {
+        userMessageText = chat[i].text;
+        userMessageId = chat[i].id;
+        break;
+      }
+    }
+    if (!userMessageText) {
+      Alert.alert('Cannot regenerate', 'No user message found before this response');
+      return;
+    }
+
+    // Mark the AI message as regenerating (UI feedback)
+    safeSetChat((prev) =>
+      prev.map((msg) =>
+        msg.id === aiMessageId ? { ...msg, isRegenerating: true } : msg
+      )
+    );
+    setRegeneratingMessageId(aiMessageId);
+
+    // Remove the AI message from chat array (we'll add a new one later)
+    // But we want to keep the regenerating placeholder. Actually we keep it with isRegenerating=true
+    // and then call sendMessage with replaceAiMessageId to update it in place.
+    try {
+      await sendMessage(userMessageText, null, aiMessageId);
+    } catch (error) {
+      // Error already handled inside sendMessage
+    }
+  };
+
+  // Markdown styles
   const markdownStyles = StyleSheet.create({
     body: { color: '#e2e8f0', fontSize: 16 },
     paragraph: { marginVertical: 0 },
@@ -258,22 +335,47 @@ export default function ChatScreen({ navigation }: any) {
     list_item: { color: '#e2e8f0' },
   });
 
-  // Custom renderer for messages with Markdown support
-  const renderMessage = ({ item }: { item: Message }) => {
+  // Custom renderer for messages with Markdown and long-press menu for AI
+  const renderMessage = ({ item, index }: { item: Message; index: number }) => {
     if (item.isUser) {
-      // Use existing ChatBubble for user messages
-      return <ChatBubble {...item} />;
+      // User messages – use ChatBubble (already has copy on long-press)
+      return <ChatBubble text={item.text} isUser={true} time={item.time} status={item.status} />;
     } else {
-      // AI messages – render with Markdown
+      // AI message – show Markdown with long-press menu
+      const handleLongPress = () => {
+        if (item.isRegenerating) return; // cannot regenerate while already regenerating
+        Alert.alert(
+          'Message options',
+          '',
+          [
+            { text: 'Copy', onPress: () => copyToClipboard(item.text) },
+            { text: 'Regenerate', onPress: () => regenerateMessage(item.id, index) },
+            { text: 'Cancel', style: 'cancel' },
+          ],
+          { cancelable: true }
+        );
+      };
+
       return (
-        <View style={styles.aiMessageContainer}>
-          <View style={styles.aiBubble}>
-            <Markdown style={markdownStyles}>
-              {item.text}
-            </Markdown>
-            <Text style={styles.timeText}>{item.time}</Text>
+        <TouchableOpacity
+          onLongPress={handleLongPress}
+          activeOpacity={0.7}
+          disabled={item.isRegenerating}
+        >
+          <View style={styles.aiMessageContainer}>
+            <View style={styles.aiBubble}>
+              {item.isRegenerating ? (
+                <View style={styles.regeneratingContainer}>
+                  <ActivityIndicator size="small" color="#3b82f6" />
+                  <Text style={styles.regeneratingText}>Regenerating...</Text>
+                </View>
+              ) : (
+                <Markdown style={markdownStyles}>{item.text}</Markdown>
+              )}
+              <Text style={styles.timeText}>{item.time}</Text>
+            </View>
           </View>
-        </View>
+        </TouchableOpacity>
       );
     }
   };
@@ -482,5 +584,15 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     marginTop: 6,
     textAlign: 'right',
+  },
+  regeneratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  regeneratingText: {
+    color: '#94a3b8',
+    fontSize: 14,
+    marginLeft: 8,
   },
 });
