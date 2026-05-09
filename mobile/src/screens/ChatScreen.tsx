@@ -24,13 +24,14 @@ import {
 
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
-
 import * as ImagePicker from "expo-image-picker";
+import Markdown from 'react-native-markdown-display';
 
 import API from "../services/api";
 import ChatBubble from "../components/ChatBubble";
 import { useAuth } from "../context/AuthContext";
 import { useChat } from "../context/ChatContext";
+import OfflineBanner from '../components/OfflineBanner';
 
 // Enable layout animations on Android
 if (Platform.OS === "android") {
@@ -244,9 +245,43 @@ export default function ChatScreen({ navigation }: any) {
     sendMessage(trimmedText, image);
   };
 
+  // Markdown styles (fixed with const assertion)
+  const markdownStyles = StyleSheet.create({
+    body: { color: '#e2e8f0', fontSize: 16 },
+    paragraph: { marginVertical: 0 },
+    heading1: { color: '#f1f5f9', fontSize: 24, fontWeight: 'bold' as const },
+    heading2: { color: '#f1f5f9', fontSize: 20, fontWeight: 'bold' as const },
+    heading3: { color: '#f1f5f9', fontSize: 18, fontWeight: 'bold' as const },
+    code_inline: { backgroundColor: '#0f172a', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, color: '#38bdf8' },
+    code_block: { backgroundColor: '#0f172a', padding: 12, borderRadius: 8, color: '#e2e8f0' },
+    link: { color: '#60a5fa' },
+    list_item: { color: '#e2e8f0' },
+  });
+
+  // Custom renderer for messages with Markdown support
+  const renderMessage = ({ item }: { item: Message }) => {
+    if (item.isUser) {
+      // Use existing ChatBubble for user messages
+      return <ChatBubble {...item} />;
+    } else {
+      // AI messages – render with Markdown
+      return (
+        <View style={styles.aiMessageContainer}>
+          <View style={styles.aiBubble}>
+            <Markdown style={markdownStyles}>
+              {item.text}
+            </Markdown>
+            <Text style={styles.timeText}>{item.time}</Text>
+          </View>
+        </View>
+      );
+    }
+  };
+
   // ---------- Render ----------
   return (
     <LinearGradient colors={["#0f172a", "#1e293b"]} style={styles.gradient}>
+      <OfflineBanner />
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
           style={styles.flex}
@@ -276,7 +311,7 @@ export default function ChatScreen({ navigation }: any) {
               ref={flatListRef}
               data={chat}
               keyExtractor={(item) => item.id}
-              renderItem={({ item }) => <ChatBubble {...item} />}
+              renderItem={renderMessage}
               contentContainerStyle={styles.chatContent}
               onContentSizeChange={scrollToBottom}
               keyboardDismissMode="interactive"
@@ -428,5 +463,24 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: "#fff",
     paddingHorizontal: 4,
+  },
+  aiMessageContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    marginVertical: 8,
+  },
+  aiBubble: {
+    maxWidth: '80%',
+    backgroundColor: '#1e293b',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomLeftRadius: 4,
+  },
+  timeText: {
+    fontSize: 10,
+    color: '#94a3b8',
+    marginTop: 6,
+    textAlign: 'right',
   },
 });
