@@ -11,7 +11,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#0F172A"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.neuromind.app"
@@ -37,7 +39,8 @@
           "backgroundColor": "#0F172A",
           "imageWidth": 200
         }
-      ]
+      ],
+      "expo-speech-recognition"
     ]
   }
 }

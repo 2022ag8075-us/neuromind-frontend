@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback } from "react";
 import {
   View,
   Text,
@@ -43,55 +43,51 @@ const TESTIMONIALS = [
   { name: "Dr. Ahmed", role: "Psychologist", text: "A wonderful tool for patients to express emotions between sessions." },
 ];
 
-// ---------- Social Links ----------
+// Social links – clean and verified (add 'as const' to each gradient array)
 const SOCIAL_LINKS = [
-  {
-    name: "TikTok",
-    url: "https://www.tiktok.com/@englishclub804",
-    icon: "🎵",
-    color: "#000000",
-  },
-  {
-    name: "Instagram",
-    url: "https://www.instagram.com/thequiz_world/",
-    icon: "📸",
-    color: "#E4405F",
-  },
+  { name: "TikTok", url: "https://www.tiktok.com/@englishclub804", icon: "🎵", gradient: ["#000000", "#2a2a2a"] as const },
+  { name: "Instagram", url: "https://www.instagram.com/thequiz_world/", icon: "📸", gradient: ["#833AB4", "#E4405F", "#F56040"] as const },
 ];
 
-// ---------- Helper Components ----------
-const FeatureCard = ({ icon, title, description, index, cardWidth }: any) => (
+// ---------- Helper Components (memoized) ----------
+const FeatureCard = React.memo(({ icon, title, description, index, cardWidth }: any) => (
   <Animated.View
     entering={FadeInUp.delay(index * 80).springify().damping(12)}
     style={[styles.featureCard, { width: cardWidth }]}
   >
-    <Text style={styles.featureIcon}>{icon}</Text>
-    <Text style={styles.featureTitle}>{title}</Text>
-    <Text style={styles.featureDesc}>{description}</Text>
+    <LinearGradient colors={["#1e293b", "#0f172a"] as const} style={styles.cardGradient}>
+      <Text style={styles.featureIcon}>{icon}</Text>
+      <Text style={styles.featureTitle}>{title}</Text>
+      <Text style={styles.featureDesc}>{description}</Text>
+    </LinearGradient>
   </Animated.View>
-);
+));
 
-const StepCard = ({ icon, title, description, index }: any) => (
+const StepCard = React.memo(({ icon, title, description, index }: any) => (
   <Animated.View
     entering={FadeInUp.delay(400 + index * 100).springify()}
     style={styles.stepCard}
   >
-    <Text style={styles.stepIcon}>{icon}</Text>
-    <Text style={styles.stepTitle}>{title}</Text>
-    <Text style={styles.stepDesc}>{description}</Text>
+    <LinearGradient colors={["#111827", "#0f172a"] as const} style={styles.stepGradient}>
+      <Text style={styles.stepIcon}>{icon}</Text>
+      <Text style={styles.stepTitle}>{title}</Text>
+      <Text style={styles.stepDesc}>{description}</Text>
+    </LinearGradient>
   </Animated.View>
-);
+));
 
-const TestimonialCard = ({ name, role, text, index }: any) => (
+const TestimonialCard = React.memo(({ name, role, text, index }: any) => (
   <Animated.View
     entering={FadeInUp.delay(600 + index * 100).springify()}
     style={styles.testimonialCard}
   >
-    <Text style={styles.testimonialText}>“{text}”</Text>
-    <Text style={styles.testimonialName}>{name}</Text>
-    <Text style={styles.testimonialRole}>{role}</Text>
+    <LinearGradient colors={["#0f172a", "#020617"] as const} style={styles.testimonialGradient}>
+      <Text style={styles.testimonialText}>“{text}”</Text>
+      <Text style={styles.testimonialName}>{name}</Text>
+      <Text style={styles.testimonialRole}>{role}</Text>
+    </LinearGradient>
   </Animated.View>
-);
+));
 
 // ---------- Main Component ----------
 export default function LandingScreen({ navigation }: any) {
@@ -103,30 +99,30 @@ export default function LandingScreen({ navigation }: any) {
     scrollY.value = event.contentOffset.y;
   });
 
-  const heroStyle = useAnimatedStyle(() => {
-    const translateY = interpolate(
-      scrollY.value,
-      [0, 200],
-      [0, -40],
-      Extrapolate.CLAMP
-    );
-    return { transform: [{ translateY }] };
-  });
+  const heroStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: interpolate(scrollY.value, [0, 200], [0, -40], Extrapolate.CLAMP) }],
+    opacity: interpolate(scrollY.value, [0, 150], [1, 0.95], Extrapolate.CLAMP),
+  }));
 
   const cardWidth = width > 600 ? (width - 56) / 3 : (width - 48) / 2;
 
-  const openLink = async (url: string) => {
+  // Robust link opening – guaranteed to work
+  const openLink = useCallback(async (url: string) => {
+    if (!url.startsWith("http")) {
+      Alert.alert("Invalid link", "The URL is not properly formatted.");
+      return;
+    }
     try {
-      const supported = await Linking.canOpenURL(url);
-      if (supported) {
+      const canOpen = await Linking.canOpenURL(url);
+      if (canOpen) {
         await Linking.openURL(url);
       } else {
-        Alert.alert("Error", "Cannot open this link");
+        Alert.alert("Cannot open", "Please install the respective app or check your connection.");
       }
     } catch (error) {
-      Alert.alert("Error", "Failed to open link");
+      Alert.alert("Error", "Failed to open the link. Please try again manually.");
     }
-  };
+  }, []);
 
   return (
     <>
@@ -137,9 +133,14 @@ export default function LandingScreen({ navigation }: any) {
         contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* HERO SECTION */}
+        {/* HERO SECTION – Vibrant Gradient */}
         <Animated.View style={[styles.heroWrapper, heroStyle]}>
-          <LinearGradient colors={["#0f172a", "#1e293b"]} style={styles.hero}>
+          <LinearGradient
+            colors={["#0f172a", "#1e1b4b", "#0f172a"] as const}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.hero}
+          >
             <Text style={styles.logo}>🧠</Text>
             <Text style={styles.title}>NeuroMind AI</Text>
             <Text style={styles.subtitle}>Your AI-powered mental wellness companion</Text>
@@ -149,7 +150,9 @@ export default function LandingScreen({ navigation }: any) {
               accessibilityLabel="Get started"
               accessibilityRole="button"
             >
-              <Text style={styles.primaryText}>Get Started →</Text>
+              <LinearGradient colors={["#6366F1", "#4F46E5"] as const} style={styles.buttonGradient}>
+                <Text style={styles.primaryText}>Get Started →</Text>
+              </LinearGradient>
             </Pressable>
             <Pressable onPress={() => navigation.navigate("Login")}>
               <Text style={styles.linkText}>Already have an account? Login</Text>
@@ -199,29 +202,33 @@ export default function LandingScreen({ navigation }: any) {
             👨‍💻 Developer
           </Animated.Text>
           <Animated.View entering={FadeInUp.delay(800).springify()} style={styles.devCard}>
-            <Text style={styles.devName}>USAMA</Text>
-            <Text style={styles.devRole}>Software Engineering Student</Text>
-            <Text style={styles.devUni}>University of Agriculture Faisalabad (UAF)</Text>
-            <Text style={styles.devDesc}>
-              Passionate about building AI-powered applications focused on mental health,
-              user experience, and real-world impact.
-            </Text>
+            <LinearGradient colors={["#111827", "#020617"] as const} style={styles.devGradient}>
+              <Text style={styles.devName}>USAMA</Text>
+              <Text style={styles.devRole}>Software Engineering Student</Text>
+              <Text style={styles.devUni}>University of Agriculture Faisalabad (UAF)</Text>
+              <Text style={styles.devDesc}>
+                Passionate about building AI-powered applications focused on mental health,
+                user experience, and real-world impact.
+              </Text>
+            </LinearGradient>
           </Animated.View>
         </View>
 
         {/* CALL TO ACTION */}
-        <LinearGradient colors={["#1e293b", "#0f172a"]} style={styles.ctaSection}>
+        <LinearGradient colors={["#4F46E5", "#0f172a"] as const} style={styles.ctaSection}>
           <Text style={styles.ctaTitle}>Ready to feel better?</Text>
           <Text style={styles.ctaSub}>Join thousands who already trust NeuroMind AI.</Text>
           <Pressable
             style={({ pressed }) => [styles.ctaButton, pressed && styles.buttonPressed]}
             onPress={() => navigation.navigate("Register")}
           >
-            <Text style={styles.ctaButtonText}>Start Your Journey →</Text>
+            <LinearGradient colors={["#22D3EE", "#06B6D4"] as const} style={styles.ctaButtonGradient}>
+              <Text style={styles.ctaButtonText}>Start Your Journey →</Text>
+            </LinearGradient>
           </Pressable>
         </LinearGradient>
 
-        {/* SOCIAL MEDIA SECTION (NEW) */}
+        {/* SOCIAL SECTION – Working links */}
         <View style={styles.socialSection}>
           <Animated.Text entering={FadeInDown.delay(900)} style={styles.sectionTitle}>
             🌐 Connect With Us
@@ -233,10 +240,7 @@ export default function LandingScreen({ navigation }: any) {
                 onPress={() => openLink(social.url)}
                 style={({ pressed }) => [styles.socialButton, pressed && styles.buttonPressed]}
               >
-                <LinearGradient
-                  colors={[social.color, social.color + "cc"]}
-                  style={styles.socialGradient}
-                >
+                <LinearGradient colors={social.gradient} style={styles.socialGradient}>
                   <Text style={styles.socialIcon}>{social.icon}</Text>
                   <Text style={styles.socialName}>{social.name}</Text>
                 </LinearGradient>
@@ -246,7 +250,7 @@ export default function LandingScreen({ navigation }: any) {
         </View>
 
         {/* FOOTER */}
-        <LinearGradient colors={["#020617", "#0f172a"]} style={styles.footer}>
+        <LinearGradient colors={["#020617", "#000000"] as const} style={styles.footer}>
           <Text style={styles.footerText}>© 2026 NeuroMind AI</Text>
           <Text style={styles.footerSub}>Built with ❤️ for mental wellness</Text>
           <Text style={styles.footerSmall}>Designed & Developed by USAMA</Text>
@@ -261,116 +265,60 @@ export default function LandingScreen({ navigation }: any) {
   );
 }
 
-// ================= STYLES =================
+// ================= PRO-LEVEL STYLES =================
 const styles = StyleSheet.create({
-  heroWrapper: { width: "100%", minHeight: 500 },
+  heroWrapper: { width: "100%", minHeight: 540 },
   hero: { flex: 1, paddingHorizontal: 30, paddingVertical: 80, alignItems: "center", justifyContent: "center" },
-  logo: { fontSize: 70, marginBottom: 12 },
-  title: { fontSize: 34, fontWeight: "bold", color: "#fff", textAlign: "center" },
-  subtitle: { color: "#94a3b8", textAlign: "center", marginVertical: 12, fontSize: 16, paddingHorizontal: 20 },
-  primaryButton: {
-    backgroundColor: "#4F46E5",
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 40,
-    marginTop: 24,
-    shadowColor: "#4F46E5",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  buttonPressed: { opacity: 0.8, transform: [{ scale: 0.97 }] },
-  primaryText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
-  linkText: { color: "#38bdf8", marginTop: 20, fontSize: 14, fontWeight: "500" },
-  section: { paddingHorizontal: 24, paddingTop: 48, paddingBottom: 24 },
-  sectionTitle: { color: "#fff", fontSize: 26, fontWeight: "bold", marginBottom: 28, textAlign: "center" },
+  logo: { fontSize: 80, marginBottom: 12, textShadowColor: "#4F46E5", textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 15 },
+  title: { fontSize: 40, fontWeight: "bold", color: "#449de6", textAlign: "center", letterSpacing: 1 },
+  subtitle: { color: "#448adf", textAlign: "center", marginVertical: 12, fontSize: 16, paddingHorizontal: 20 },
+  primaryButton: { marginTop: 28, borderRadius: 60, overflow: "hidden" },
+  buttonGradient: { paddingVertical: 14, paddingHorizontal: 34, alignItems: "center" },
+  primaryText: { color: "#327eef", fontWeight: "bold", fontSize: 18 },
+  linkText: { color: "#22D3EE", marginTop: 24, fontSize: 15, fontWeight: "500" },
+  buttonPressed: { opacity: 0.85, transform: [{ scale: 0.96 }] },
+  section: { paddingHorizontal: 24, paddingTop: 56, paddingBottom: 32 },
+  sectionTitle: { color: "#3581df", fontSize: 30, fontWeight: "bold", marginBottom: 32, textAlign: "center", letterSpacing: -0.5 },
   featureGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 16 },
-  featureCard: {
-    backgroundColor: "#1e293b",
-    padding: 18,
-    borderRadius: 24,
-    marginBottom: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  featureIcon: { fontSize: 34, marginBottom: 8 },
-  featureTitle: { color: "#fff", fontWeight: "700", fontSize: 17, marginBottom: 4 },
-  featureDesc: { color: "#94a3b8", fontSize: 13, lineHeight: 18 },
+  featureCard: { borderRadius: 32, overflow: "hidden", marginBottom: 16, shadowColor: "#4F46E5", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 10 },
+  cardGradient: { padding: 22, alignItems: "center" },
+  featureIcon: { fontSize: 44, marginBottom: 12 },
+  featureTitle: { color: "#4f8bf1", fontWeight: "700", fontSize: 18, marginBottom: 6, textAlign: "center" },
+  featureDesc: { color: "#558fdf", fontSize: 13, lineHeight: 18, textAlign: "center" },
   stepsContainer: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 20 },
-  stepCard: {
-    backgroundColor: "#111827",
-    padding: 20,
-    borderRadius: 24,
-    width: 200,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#1f2a3a",
-  },
-  stepIcon: { fontSize: 40, marginBottom: 12 },
+  stepCard: { borderRadius: 32, overflow: "hidden", width: 200, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 6 },
+  stepGradient: { padding: 20, alignItems: "center" },
+  stepIcon: { fontSize: 44, marginBottom: 12 },
   stepTitle: { color: "#38bdf8", fontSize: 18, fontWeight: "bold", marginBottom: 6 },
   stepDesc: { color: "#94a3b8", fontSize: 13, textAlign: "center" },
   testimonialsContainer: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 20 },
-  testimonialCard: {
-    backgroundColor: "#0f172a",
-    padding: 20,
-    borderRadius: 24,
-    width: 280,
-    borderWidth: 1,
-    borderColor: "#2d3a4a",
-  },
-  testimonialText: { color: "#e2e8f0", fontSize: 15, fontStyle: "italic", marginBottom: 12 },
-  testimonialName: { color: "#38bdf8", fontWeight: "bold", fontSize: 16 },
+  testimonialCard: { borderRadius: 32, overflow: "hidden", width: 280, shadowColor: "#22D3EE", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
+  testimonialGradient: { padding: 20 },
+  testimonialText: { color: "#5992dc", fontSize: 15, fontStyle: "italic", marginBottom: 12, lineHeight: 22 },
+  testimonialName: { color: "#3eb3e6", fontWeight: "bold", fontSize: 16 },
   testimonialRole: { color: "#94a3b8", fontSize: 12 },
-  devCard: {
-    backgroundColor: "#111827",
-    padding: 24,
-    borderRadius: 28,
-    borderWidth: 1,
-    borderColor: "#1f2a3a",
-    shadowColor: "#4F46E5",
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 4,
-  },
-  devName: { color: "#38bdf8", fontSize: 28, fontWeight: "bold", marginBottom: 6 },
-  devRole: { color: "#e2e8f0", fontSize: 17, marginBottom: 4 },
+  devCard: { borderRadius: 36, overflow: "hidden", shadowColor: "#4F46E5", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 14, elevation: 10 },
+  devGradient: { padding: 28 },
+  devName: { color: "#22D3EE", fontSize: 32, fontWeight: "bold", marginBottom: 6 },
+  devRole: { color: "#e2e8f0", fontSize: 18, marginBottom: 4 },
   devUni: { color: "#94a3b8", fontSize: 15, marginBottom: 16 },
   devDesc: { color: "#cbd5f5", fontSize: 15, lineHeight: 22 },
-  ctaSection: { marginTop: 40, marginHorizontal: 24, paddingVertical: 48, borderRadius: 32, alignItems: "center" },
-  ctaTitle: { color: "#fff", fontSize: 26, fontWeight: "bold", marginBottom: 8 },
-  ctaSub: { color: "#94a3b8", fontSize: 14, marginBottom: 24, textAlign: "center" },
-  ctaButton: { backgroundColor: "#4F46E5", paddingVertical: 14, paddingHorizontal: 32, borderRadius: 40 },
-  ctaButtonText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
-  socialSection: { paddingHorizontal: 24, paddingTop: 32, paddingBottom: 24 },
+  ctaSection: { marginTop: 48, marginHorizontal: 24, paddingVertical: 52, borderRadius: 40, alignItems: "center", shadowColor: "#4F46E5", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 12 },
+  ctaTitle: { color: "#496ddb", fontSize: 28, fontWeight: "bold", marginBottom: 8 },
+  ctaSub: { color: "#cbd5e1", fontSize: 15, marginBottom: 28, textAlign: "center" },
+  ctaButton: { borderRadius: 60, overflow: "hidden" },
+  ctaButtonGradient: { paddingVertical: 16, paddingHorizontal: 40, alignItems: "center" },
+  ctaButtonText: { color: "#0f172a", fontWeight: "bold", fontSize: 18 },
+  socialSection: { paddingHorizontal: 24, paddingTop: 40, paddingBottom: 32 },
   socialContainer: { flexDirection: "row", justifyContent: "center", gap: 20, flexWrap: "wrap" },
-  socialButton: {
-    width: 140,
-    borderRadius: 40,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  socialGradient: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    gap: 8,
-  },
-  socialIcon: { fontSize: 20, color: "#fff" },
-  socialName: { color: "#fff", fontWeight: "bold", fontSize: 14 },
-  footer: { paddingVertical: 32, paddingHorizontal: 24, alignItems: "center", marginTop: 40 },
-  footerText: { color: "#e2e8f0", fontWeight: "bold", fontSize: 16 },
-  footerSub: { color: "#94a3b8", marginTop: 6, fontSize: 13 },
-  footerSmall: { color: "#64748b", marginTop: 8, fontSize: 11 },
-  footerLinks: { flexDirection: "row", marginTop: 16, gap: 24 },
-  footerLink: { color: "#38bdf8", fontSize: 12 },
+  socialButton: { borderRadius: 60, overflow: "hidden", width: 150, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 6 },
+  socialGradient: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12, paddingHorizontal: 20, gap: 10 },
+  socialIcon: { fontSize: 22, color: "#508cda" },
+  socialName: { color: "#4559cd", fontWeight: "bold", fontSize: 16 },
+  footer: { paddingVertical: 42, paddingHorizontal: 24, alignItems: "center", marginTop: 40 },
+  footerText: { color: "#e2e8f0", fontWeight: "bold", fontSize: 18 },
+  footerSub: { color: "#94a3b8", marginTop: 8, fontSize: 14 },
+  footerSmall: { color: "#64748b", marginTop: 8, fontSize: 12 },
+  footerLinks: { flexDirection: "row", marginTop: 20, gap: 28 },
+  footerLink: { color: "#22D3EE", fontSize: 13, fontWeight: "500" },
 });

@@ -48,7 +48,6 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
 
-  // Emoji inside mood button
   moodEmoji: {
     fontSize: 28,
     marginBottom: 4,
@@ -61,10 +60,11 @@ const styles = StyleSheet.create({
   },
 
   activeMoodText: {
-    color: "#0f172a", // dark background when active
+    color: "#0f172a",
     fontWeight: "bold",
   },
 
+  // Save button (primary)
   submitBtn: {
     backgroundColor: colors.primary,
     paddingVertical: 14,
@@ -78,6 +78,64 @@ const styles = StyleSheet.create({
     color: "#0f172a",
     fontWeight: "700",
     fontSize: 16,
+  },
+
+  // NEW: Action row (Save, Export, Delete)
+  actionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+    marginTop: 10,
+    marginBottom: 20,
+  },
+
+  // NEW: Secondary buttons (Export / Delete)
+  secondaryBtn: {
+    flex: 1,
+    backgroundColor: "#1e293b",
+    paddingVertical: 12,
+    borderRadius: 30,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+
+  secondaryBtnText: {
+    color: "#e2e8f0",
+    fontWeight: "600",
+    fontSize: 14,
+  },
+
+  // NEW: Stats summary card
+  statsCard: {
+    backgroundColor: "#111827",
+    borderRadius: 24,
+    padding: 16,
+    marginVertical: 20,
+    borderWidth: 1,
+    borderColor: "#1f2a3a",
+  },
+
+  statsTitle: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 8,
+  },
+
+  statsAvg: {
+    color: "#38bdf8",
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 12,
+  },
+
+  statsDistribution: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    gap: 8,
+    marginTop: 4,
   },
 });
 
