@@ -78,4 +78,25 @@ export const authStyles = StyleSheet.create({
     marginTop: 15,
     fontSize: 14,
   },
+
+  // =========================
+  // NEW STYLES FOR PASSWORD TOGGLE
+  // =========================
+  passwordContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: "100%",
+    marginBottom: 12,
+  },
+  passwordInput: {
+    flex: 1,
+    marginRight: 8,
+  },
+  eyeIcon: {
+    padding: 10,
+  },
+  eyeText: {
+    fontSize: 20,
+    color: "#94a3b8",
+  },
 });

@@ -2,50 +2,43 @@ import { StyleSheet } from "react-native";
 import { colors } from "../../styles/colors";
 
 const styles = StyleSheet.create({
-  // =========================
-  // CONTAINER
-  // =========================
   container: {
     flex: 1,
     backgroundColor: colors.background,
     padding: 20,
   },
 
-  // =========================
-  // TITLES
-  // =========================
   title: {
     color: colors.text,
     fontSize: 20,
     fontWeight: "700",
     textAlign: "center",
-    marginBottom: 20,
+    marginBottom: 8,
   },
 
   subtitle: {
     color: colors.subtext,
     textAlign: "center",
-    marginBottom: 10,
+    marginBottom: 24,
+    fontSize: 14,
   },
 
-  // =========================
-  // MOOD BUTTON GRID
-  // =========================
+  // Mood buttons row
   row: {
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "center",
-    gap: 10,
-    marginBottom: 20,
+    gap: 12,
+    marginBottom: 24,
   },
 
   moodBtn: {
     backgroundColor: colors.card,
-    paddingVertical: 14,
+    paddingVertical: 12,
     paddingHorizontal: 12,
-    borderRadius: 12,
+    borderRadius: 16,
     alignItems: "center",
-    width: 90,
+    minWidth: 80,
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -55,46 +48,36 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
 
-  emoji: {
-    fontSize: 24,
+  // Emoji inside mood button
+  moodEmoji: {
+    fontSize: 28,
     marginBottom: 4,
   },
 
   moodText: {
     color: colors.text,
     fontSize: 13,
-    textTransform: "capitalize",
+    fontWeight: "500",
   },
 
-  // =========================
-  // SUBMIT BUTTON
-  // =========================
+  activeMoodText: {
+    color: "#0f172a", // dark background when active
+    fontWeight: "bold",
+  },
+
   submitBtn: {
     backgroundColor: colors.primary,
-    padding: 14,
-    borderRadius: 12,
+    paddingVertical: 14,
+    borderRadius: 32,
     alignItems: "center",
-    marginTop: 10,
+    marginTop: 8,
+    marginBottom: 24,
   },
 
   submitText: {
-    color: "#fff",
-    fontWeight: "600",
-    fontSize: 15,
-  },
-
-  // =========================
-  // CHART SECTION
-  // =========================
-  chartContainer: {
-    marginTop: 30,
-    alignItems: "center",
-  },
-
-  emptyText: {
-    color: colors.subtext,
-    textAlign: "center",
-    marginTop: 30,
+    color: "#0f172a",
+    fontWeight: "700",
+    fontSize: 16,
   },
 });
 

@@ -10,93 +10,70 @@ import {
   View,
 } from "react-native";
 
-import API, { setToken } from "../services/api";
+import API from "../services/api";
+import { useAuth } from "../context/AuthContext";
+import { useChat } from "../context/ChatContext";
 import { authStyles as styles } from "./styles/authStyles";
-import { useAuth } from "../context/AuthContext"; // ✅ IMPORTANT
-import Input from "../components/Input";
-import Button from "../components/Button";
 
 export default function LoginScreen({ navigation }: any) {
-  const { refreshAuth } = useAuth(); // ✅ triggers navigator update
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
-  // =========================
-  // 🔐 LOGIN HANDLER
-  // =========================
+  const { login } = useAuth();
+  const { clearSessions } = useChat();
+
   const handleLogin = async () => {
     if (loading) return;
 
     const cleanEmail = email.trim().toLowerCase();
     const cleanPassword = password.trim();
 
-    // =========================
-    // VALIDATION
-    // =========================
     if (!cleanEmail || !cleanPassword) {
-      return Alert.alert("Error", "Please fill all fields");
+      Alert.alert("Error", "Please fill all fields");
+      return;
     }
-
     if (!cleanEmail.includes("@")) {
-      return Alert.alert("Error", "Enter a valid email");
+      Alert.alert("Error", "Enter a valid email");
+      return;
     }
-
     if (cleanPassword.length < 6) {
-      return Alert.alert("Error", "Password must be at least 6 characters");
+      Alert.alert("Error", "Password must be at least 6 characters");
+      return;
     }
 
     try {
       setLoading(true);
 
-      console.log("🔐 LOGIN REQUEST STARTED");
-
-      // =========================
-      // API CALL
-      // =========================
       const res = await API.post("/auth/login", {
         email: cleanEmail,
         password: cleanPassword,
       });
 
-      console.log("✅ LOGIN SUCCESS:", res.data);
+      const token = res.data?.token;
+      if (!token) throw new Error("No token returned from server");
 
-      // =========================
-      // TOKEN SAVE
-      // =========================
-      if (!res.data?.token) {
-        throw new Error("Token missing from server");
-      }
+      await login(token);
+      await clearSessions(); // remove old chat data when logging into a different account
 
-      await setToken(res.data.token);
-
-      console.log("🔐 TOKEN SAVED");
-
-      // =========================
-      // 🔥 THIS FIXES NAVIGATION
-      // =========================
-      await refreshAuth();
-
-      console.log("🚀 USER AUTH STATE UPDATED");
-
+      // Navigate directly to Home (or main app)
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Home" }],
+      });
     } catch (err: any) {
-      console.log("❌ LOGIN ERROR:", err.response?.data || err.message);
-
+      console.log("Login error:", err?.response?.data || err.message);
       const message =
-        err.response?.data?.message ||
+        err?.response?.data?.message ||
         err.message ||
-        "Invalid credentials / network error";
-
+        "Invalid credentials. Please try again.";
       Alert.alert("Login Failed", message);
     } finally {
       setLoading(false);
     }
   };
 
-  // =========================
-  // UI
-  // =========================
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -105,7 +82,6 @@ export default function LoginScreen({ navigation }: any) {
       <View style={styles.card}>
         <Text style={styles.title}>Welcome Back 👋</Text>
 
-        {/* EMAIL */}
         <TextInput
           placeholder="Email"
           value={email}
@@ -116,22 +92,26 @@ export default function LoginScreen({ navigation }: any) {
           placeholderTextColor="#94a3b8"
         />
 
-        {/* PASSWORD */}
-        <TextInput
-          placeholder="Password"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-          style={styles.input}
-          placeholderTextColor="#94a3b8"
-        />
+        {/* Password with toggle */}
+        <View style={styles.passwordContainer}>
+          <TextInput
+            placeholder="Password"
+            secureTextEntry={!showPassword}
+            value={password}
+            onChangeText={setPassword}
+            style={[styles.input, styles.passwordInput]}
+            placeholderTextColor="#94a3b8"
+          />
+          <TouchableOpacity
+            onPress={() => setShowPassword(!showPassword)}
+            style={styles.eyeIcon}
+          >
+            <Text style={styles.eyeText}>{showPassword ? "🙈" : "👁️"}</Text>
+          </TouchableOpacity>
+        </View>
 
-        {/* LOGIN BUTTON */}
         <TouchableOpacity
-          style={[
-            styles.button,
-            loading && { opacity: 0.7 }, // disable effect
-          ]}
+          style={[styles.button, loading && { opacity: 0.7 }]}
           onPress={handleLogin}
           disabled={loading}
         >
@@ -142,13 +122,8 @@ export default function LoginScreen({ navigation }: any) {
           )}
         </TouchableOpacity>
 
-        {/* NAVIGATION */}
-        <TouchableOpacity
-          onPress={() => navigation.navigate("Register")}
-        >
-          <Text style={styles.linkText}>
-            Don't have an account? Register
-          </Text>
+        <TouchableOpacity onPress={() => navigation.navigate("Register")}>
+          <Text style={styles.linkText}>Don't have an account? Sign up</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
