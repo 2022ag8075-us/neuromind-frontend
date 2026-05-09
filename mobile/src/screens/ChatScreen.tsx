@@ -50,6 +50,7 @@ interface Message {
   isUser: boolean;
   time: string;
   status?: Status;
+  retryCount?: number;
   isRegenerating?: boolean;
   pinned?: boolean;
 }
@@ -89,6 +90,7 @@ export default function ChatScreen({ navigation }: any) {
   const isMounted = useRef(true);
   const currentSessionRef = useRef<string | null>(null);
 
+  // Memory leak fix
   useEffect(() => {
     return () => { isMounted.current = false; };
   }, []);
@@ -99,42 +101,72 @@ export default function ChatScreen({ navigation }: any) {
 
   const scrollToBottom = () => requestAnimationFrame(() => flatListRef.current?.scrollToEnd({ animated: true }));
 
-  // --- Load messages – stable callback ---
+  // --- Load messages – FIXED: removed duplicate prevention bug ---
   const loadMessages = useCallback(async () => {
     if (!activeSessionId) {
-      // No active session → clear any stale chat
       safeSetChat(() => []);
       return;
     }
-    if (currentSessionRef.current === activeSessionId) return; // avoid duplicate loads
-    currentSessionRef.current = activeSessionId;
+
     setInitialLoading(true);
+
     try {
-      console.log(`📥 Loading messages for session: ${activeSessionId}`);
-      const res = await API.get(`/chat/messages/${activeSessionId}`);
-      if (currentSessionRef.current !== activeSessionId) return;
-      // Support both res.data.data and res.data.messages
-      let raw = res.data?.data;
-      if (!Array.isArray(raw)) raw = res.data?.messages;
-      if (!Array.isArray(raw)) raw = [];
-      
-      const sorted = raw.sort(
-        (a: any, b: any) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
-      );
-      const formatted: Message[] = sorted.map((m: any, idx: number) => ({
-        id: `${m.createdAt || Date.now()}_${idx}`,
-        text: m.content || "",
-        isUser: m.role === "user",
-        time: new Date(m.createdAt || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      }));
+      console.log("📥 Loading session:", activeSessionId);
+
+      const response = await API.get(`/chat/messages/${activeSessionId}`);
+
+      console.log("📥 RAW RESPONSE:", response.data);
+
+      let rawMessages = [];
+
+      if (Array.isArray(response.data?.data)) {
+        rawMessages = response.data.data;
+      } else if (Array.isArray(response.data?.messages)) {
+        rawMessages = response.data.messages;
+      }
+
       const pinnedMap = await loadPinnedMap();
-      const withPins = formatted.map(msg => ({ ...msg, pinned: !!pinnedMap[msg.id] }));
-      safeSetChat(() => withPins);
+
+      const formatted: Message[] = rawMessages.map(
+        (msg: any, index: number) => ({
+          id:
+            msg._id ||
+            `${msg.createdAt || Date.now()}_${index}`,
+
+          text: msg.content || "",
+
+          isUser: msg.role === "user",
+
+          time: new Date(
+            msg.createdAt || Date.now()
+          ).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+
+          pinned: !!pinnedMap[
+            msg._id ||
+              `${msg.createdAt || Date.now()}_${index}`
+          ],
+        })
+      );
+
+      safeSetChat(() => formatted);
+
     } catch (error: any) {
-      console.error("Load messages error:", error?.message);
-      Alert.alert("Error", "Failed to load chat history");
+      console.log(
+        "❌ LOAD CHAT ERROR:",
+        error?.response?.data || error.message
+      );
+
+      Alert.alert(
+        "Error",
+        "Failed to load chat history"
+      );
     } finally {
-      if (isMounted.current) setInitialLoading(false);
+      if (isMounted.current) {
+        setInitialLoading(false);
+      }
     }
   }, [activeSessionId, safeSetChat]);
 
@@ -154,47 +186,143 @@ export default function ChatScreen({ navigation }: any) {
     if (chat.length) scrollToBottom();
   }, [chat]);
 
-  // ---------- Other functions (image picker, send, etc.) remain unchanged ----------
+  // ---------- Image picker ----------
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
     if (!result.canceled && result.assets?.length) setImage(result.assets[0]);
   };
 
-  const sendMessage = async (text: string, imageObj?: ImageAsset | null, replaceAiMessageId?: string | null) => {
+  // --- STREAMING sendMessage (with token-by-token rendering) ---
+  const sendMessage = async (
+    text: string,
+    imageObj?: ImageAsset | null,
+    replaceAiMessageId?: string | null
+  ) => {
     if (loading) return;
-    if (!text && !imageObj) return;
-    const tempId = generateId();
-    let userMessageAdded = false;
-    if (!replaceAiMessageId) {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      safeSetChat(prev => [...prev, { id: tempId, text: text || (imageObj ? "📷 Image" : ""), isUser: true, time: getTime(), status: "sending" }]);
-      userMessageAdded = true;
+
+    // For streaming, we don't support images (simplified)
+    if (imageObj) {
+      Alert.alert("Not Supported", "Image upload is not supported in streaming mode. Please use text only.");
+      return;
     }
+
+    if (!text.trim()) return;
+
+    const tempUserId = generateId();
+    const tempAiId = generateId();
+
     setLoading(true);
+
     try {
-      const formData = new FormData();
-      if (text) formData.append("message", text);
-      if (activeSessionId) formData.append("sessionId", activeSessionId);
-      if (imageObj) formData.append("files", { uri: imageObj.uri, name: "image.jpg", type: "image/jpeg" } as any);
-      const response = await API.post("/ai/unified-chat", formData, { headers: { "Content-Type": "multipart/form-data" } });
-      const reply = response.data?.reply || "I'm here for you.";
-      if (userMessageAdded) {
-        safeSetChat(prev => prev.map(msg => msg.id === tempId ? { ...msg, status: "sent" } : msg));
-        safeSetChat(prev => [...prev, { id: generateId(), text: reply, isUser: false, time: getTime() }]);
-      } else if (replaceAiMessageId) {
-        safeSetChat(prev => prev.map(msg => msg.id === replaceAiMessageId ? { ...msg, text: reply, time: getTime(), isRegenerating: false } : msg));
-        setRegeneratingMessageId(null);
+      if (!replaceAiMessageId) {
+        LayoutAnimation.configureNext(
+          LayoutAnimation.Presets.easeInEaseOut
+        );
+
+        safeSetChat(prev => [
+          ...prev,
+          {
+            id: tempUserId,
+            text,
+            isUser: true,
+            time: getTime(),
+            status: "sent",
+          },
+          {
+            id: tempAiId,
+            text: "",
+            isUser: false,
+            time: getTime(),
+          },
+        ]);
       }
-      if (response.data?.sessionId) selectSession(response.data.sessionId);
-      if (userMessageAdded) setImage(null);
-    } catch (error) {
-      if (userMessageAdded) safeSetChat(prev => prev.map(msg => msg.id === tempId ? { ...msg, status: "error" } : msg));
-      else if (replaceAiMessageId) {
-        safeSetChat(prev => prev.map(msg => msg.id === replaceAiMessageId ? { ...msg, isRegenerating: false } : msg));
-        setRegeneratingMessageId(null);
-        Alert.alert("Error", "Could not regenerate");
-      } else Alert.alert("Error", "Message could not be sent");
-    } finally { setLoading(false); }
+
+      const authHeader =
+  API.defaults.headers.common["Authorization"];
+
+const token =
+  typeof authHeader === "string"
+    ? authHeader.replace("Bearer ", "")
+    : "";
+
+const response = await fetch(
+  `${API.defaults.baseURL}/chat/stream`,
+  {
+    method: "POST",
+
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+
+    body: JSON.stringify({
+      message: text,
+      sessionId: activeSessionId,
+    }),
+  }
+);
+
+      if (!response.body) {
+        throw new Error("No response stream");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let aiText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+
+          try {
+            const parsed = JSON.parse(
+              line.replace("data:", "").trim()
+            );
+
+            if (parsed.token) {
+              aiText += parsed.token;
+
+              safeSetChat(prev =>
+                prev.map(msg =>
+                  msg.id === tempAiId
+                    ? {
+                        ...msg,
+                        text: aiText,
+                      }
+                    : msg
+                )
+              );
+            }
+
+            if (parsed.done) {
+              if (parsed.sessionId) {
+                selectSession(parsed.sessionId);
+              }
+            }
+          } catch {}
+        }
+      }
+
+      // Force reload chat history to sync with backend
+      await loadMessages();
+
+    } catch (error: any) {
+      console.log("STREAM ERROR:", error);
+
+      Alert.alert(
+        "Error",
+        "Failed to send message"
+      );
+    } finally {
+      setLoading(false);
+      setImage(null);
+    }
   };
 
   const handleSend = () => {
@@ -202,6 +330,12 @@ export default function ChatScreen({ navigation }: any) {
     if (!trimmed && !image) return;
     setMessage("");
     sendMessage(trimmed, image);
+  };
+
+  // --- Retry failed message ---
+  const retryMessage = (failedMessageId: string, originalText: string) => {
+    safeSetChat(prev => prev.filter(m => m.id !== failedMessageId));
+    sendMessage(originalText, null, null);
   };
 
   // --- Clipboard & Haptics ---
@@ -244,7 +378,7 @@ export default function ChatScreen({ navigation }: any) {
     await sendMessage(userMessageText, null, aiMessageId);
   };
 
-  // --- Voice (placeholder) ---
+  // --- Voice recording placeholder ---
   const startRecording = async () => {
     try {
       const { granted } = await Audio.requestPermissionsAsync();
@@ -289,10 +423,19 @@ export default function ChatScreen({ navigation }: any) {
     }
   };
 
-  // --- Render message ---
+  // --- Render message (with retry button for error user messages) ---
   const renderMessage = ({ item, index }: { item: Message; index: number }) => {
     if (item.isUser) {
-      return <ChatBubble text={item.text} isUser time={item.time} status={item.status} />;
+      return (
+        <View>
+          <ChatBubble text={item.text} isUser time={item.time} status={item.status} />
+          {item.status === "error" && (
+            <TouchableOpacity onPress={() => retryMessage(item.id, item.text)} style={styles.retryButton}>
+              <Text style={styles.retryText}>⟳ Retry</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      );
     } else {
       const handleLongPress = () => {
         if (item.isRegenerating) return;
@@ -330,8 +473,9 @@ export default function ChatScreen({ navigation }: any) {
     }
   };
 
+  // Improved markdown styles with lineHeight
   const markdownStyles = StyleSheet.create({
-    body: { color: '#e2e8f0', fontSize: 16 },
+    body: { color: '#e2e8f0', fontSize: 16, lineHeight: 26 },
     paragraph: { marginVertical: 0 },
     heading1: { color: '#f1f5f9', fontSize: 24, fontWeight: 'bold' as const },
     heading2: { color: '#f1f5f9', fontSize: 20, fontWeight: 'bold' as const },
@@ -371,15 +515,25 @@ export default function ChatScreen({ navigation }: any) {
           {initialLoading ? (
             <View style={styles.centerLoader}><ActivityIndicator size="large" color="#3b82f6" /></View>
           ) : (
-            <FlatList
-              ref={flatListRef}
-              data={filteredChat}
-              keyExtractor={(item) => item.id}
-              renderItem={renderMessage}
-              contentContainerStyle={styles.chatContent}
-              onContentSizeChange={scrollToBottom}
-              keyboardDismissMode="interactive"
-            />
+            <>
+              {!initialLoading && filteredChat.length === 0 && (
+                <View style={styles.emptyContainer}>
+                  <Text style={styles.emptyTitle}>NeuroMind AI</Text>
+                  <Text style={styles.emptySubtitle}>
+                    Start a conversation with your AI assistant
+                  </Text>
+                </View>
+              )}
+              <FlatList
+                ref={flatListRef}
+                data={filteredChat}
+                keyExtractor={(item, index) => item.id || index.toString()}
+                renderItem={renderMessage}
+                contentContainerStyle={styles.chatContent}
+                onContentSizeChange={scrollToBottom}
+                keyboardDismissMode="interactive"
+              />
+            </>
           )}
 
           {image && (
@@ -427,6 +581,24 @@ const styles = StyleSheet.create({
   searchClose: { color: "#fff", fontSize: 16 },
   chatContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 80 },
   centerLoader: { flex: 1, justifyContent: "center", alignItems: "center" },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 30,
+  },
+  emptyTitle: {
+    color: "#fff",
+    fontSize: 28,
+    fontWeight: "700",
+    marginBottom: 12,
+  },
+  emptySubtitle: {
+    color: "#94a3b8",
+    fontSize: 15,
+    textAlign: "center",
+    lineHeight: 22,
+  },
   previewContainer: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 8, backgroundColor: "rgba(0,0,0,0.6)", marginHorizontal: 16, marginBottom: 8, borderRadius: 12 },
   previewImage: { width: 50, height: 50, borderRadius: 8, marginRight: 12 },
   removeText: { color: "#ef4444", fontWeight: "600" },
@@ -446,4 +618,6 @@ const styles = StyleSheet.create({
   regeneratingContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   regeneratingText: { color: '#94a3b8', fontSize: 14, marginLeft: 8 },
   pinIcon: { fontSize: 12, color: '#facc15', position: 'absolute', top: -6, right: -6 },
+  retryButton: { alignSelf: 'flex-start', marginLeft: 16, marginTop: 4, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 4, backgroundColor: '#ef4444', borderRadius: 16 },
+  retryText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 });

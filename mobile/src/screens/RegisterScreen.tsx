@@ -12,7 +12,7 @@ import {
 
 import API from "../services/api";
 import { useAuth } from "../context/AuthContext";
-import { useChat } from "../context/ChatContext"; // import chat hook
+import { useChat } from "../context/ChatContext";
 import { authStyles as styles } from "./styles/authStyles";
 
 export default function RegisterScreen({ navigation }: any) {
@@ -21,9 +21,11 @@ export default function RegisterScreen({ navigation }: any) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const { login } = useAuth();
-  const { clearSessions } = useChat(); // reset chat sessions on new signup
+  const { clearSessions } = useChat();
 
   const handleRegister = async () => {
     if (loading) return;
@@ -31,7 +33,6 @@ export default function RegisterScreen({ navigation }: any) {
     const cleanName = name.trim();
     const cleanEmail = email.trim().toLowerCase();
 
-    // Validation
     if (!cleanName || !cleanEmail || !password || !confirmPassword) {
       Alert.alert("Error", "All fields are required");
       return;
@@ -48,14 +49,12 @@ export default function RegisterScreen({ navigation }: any) {
     try {
       setLoading(true);
 
-      // 1. Register API call
       const res = await API.post("/auth/register", {
         name: cleanName,
         email: cleanEmail,
         password,
       });
 
-      // 2. Save token via AuthContext (triggers auth state update)
       const newToken = res.data?.token;
       if (newToken) {
         await login(newToken);
@@ -63,15 +62,12 @@ export default function RegisterScreen({ navigation }: any) {
         throw new Error("No token returned from server");
       }
 
-      // 3. Clear any cached chat data (old sessions) – critical for new account
       await clearSessions();
-
       Alert.alert("Success 🎉", "Account created successfully");
 
-      // 4. Navigate to main app (e.g., Home) – not back to login
       navigation.reset({
         index: 0,
-        routes: [{ name: "Home" }], // or your main screen name
+        routes: [{ name: "Home" }],
       });
     } catch (err: any) {
       console.log("Registration error:", err?.response?.data || err.message);
@@ -111,23 +107,35 @@ export default function RegisterScreen({ navigation }: any) {
           placeholderTextColor="#94a3b8"
         />
 
-        <TextInput
-          placeholder="Password"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-          style={styles.input}
-          placeholderTextColor="#94a3b8"
-        />
+        {/* Password with toggle */}
+        <View style={styles.passwordContainer}>
+          <TextInput
+            placeholder="Password"
+            secureTextEntry={!showPassword}
+            value={password}
+            onChangeText={setPassword}
+            style={[styles.input, styles.passwordInput]}
+            placeholderTextColor="#94a3b8"
+          />
+          <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
+            <Text style={styles.eyeText}>{showPassword ? "🙈" : "👁️"}</Text>
+          </TouchableOpacity>
+        </View>
 
-        <TextInput
-          placeholder="Confirm Password"
-          secureTextEntry
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-          style={styles.input}
-          placeholderTextColor="#94a3b8"
-        />
+        {/* Confirm Password with toggle */}
+        <View style={styles.passwordContainer}>
+          <TextInput
+            placeholder="Confirm Password"
+            secureTextEntry={!showConfirmPassword}
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            style={[styles.input, styles.passwordInput]}
+            placeholderTextColor="#94a3b8"
+          />
+          <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeIcon}>
+            <Text style={styles.eyeText}>{showConfirmPassword ? "🙈" : "👁️"}</Text>
+          </TouchableOpacity>
+        </View>
 
         <TouchableOpacity
           style={styles.button}
@@ -142,9 +150,7 @@ export default function RegisterScreen({ navigation }: any) {
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => navigation.navigate("Login")}>
-          <Text style={styles.linkText}>
-            Already have an account? Login
-          </Text>
+          <Text style={styles.linkText}>Already have an account? Login</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
