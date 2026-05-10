@@ -1,10 +1,7 @@
-import React, { useEffect } from "react";
-import { NavigationContainer } from "@react-navigation/native";
+import React, { useEffect, useCallback } from "react";
+import { NavigationContainer, useFocusEffect } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import {
-  createDrawerNavigator,
-  DrawerContentScrollView,
-} from "@react-navigation/drawer";
+import { createDrawerNavigator, DrawerContentScrollView } from "@react-navigation/drawer";
 
 import {
   View,
@@ -41,11 +38,39 @@ function CustomDrawerContent(props: any) {
     selectSession,
     removeSession,
     fetchSessions,
+    createNewSession,
   } = useChat();
 
-  useEffect(() => {
-    fetchSessions();
-  }, []);
+  // Refresh sessions when drawer is opened
+  useFocusEffect(
+    useCallback(() => {
+      fetchSessions();
+    }, [fetchSessions])
+  );
+
+  // Handle new chat creation – same logic as header button
+  const handleNewChat = async () => {
+    try {
+      const newId = await createNewSession();
+      if (newId) {
+        // createNewSession already calls selectSession internally
+        navigation.navigate("Chat", { sessionId: newId });
+        navigation.closeDrawer();
+      } else {
+        Alert.alert("Error", "Could not create new chat");
+      }
+    } catch (error) {
+      console.error("New chat error:", error);
+      Alert.alert("Error", "Failed to create new chat");
+    }
+  };
+
+  // Handle session selection
+  const handleSelectSession = (sessionId: string) => {
+    selectSession(sessionId);
+    navigation.navigate("Chat", { sessionId });
+    navigation.closeDrawer();
+  };
 
   return (
     <DrawerContentScrollView
@@ -56,14 +81,7 @@ function CustomDrawerContent(props: any) {
       <Text style={styles.title}>🧠 NeuroMind</Text>
 
       {/* NEW CHAT */}
-      <TouchableOpacity
-        style={styles.newChatBtn}
-        onPress={() => {
-          selectSession(null);
-          navigation.navigate("Chat", { newChat: true });
-          navigation.closeDrawer();
-        }}
-      >
+      <TouchableOpacity style={styles.newChatBtn} onPress={handleNewChat}>
         <Text style={styles.newChatText}>➕ New Chat</Text>
       </TouchableOpacity>
 
@@ -74,19 +92,13 @@ function CustomDrawerContent(props: any) {
         <TouchableOpacity
           key={s.sessionId}
           style={styles.sessionItem}
-          onPress={() => {
-            selectSession(s.sessionId);
-            navigation.navigate("Chat", {
-              sessionId: s.sessionId,
-            });
-            navigation.closeDrawer();
-          }}
+          onPress={() => handleSelectSession(s.sessionId)}
           onLongPress={() => {
             Alert.alert(
               "Delete Chat",
               "Are you sure?",
               [
-                { text: "Cancel" },
+                { text: "Cancel", style: "cancel" },
                 {
                   text: "Delete",
                   style: "destructive",

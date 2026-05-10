@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from "react";
+import React, { memo, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -22,6 +22,9 @@ interface Props {
   activeSession: string | null;
   onSelect: (id: string) => void;
   onNewChat: () => void;
+
+  // ✅ NEW: optional search support from header (controlled externally)
+  searchQuery?: string;
 }
 
 // ==============================
@@ -29,11 +32,9 @@ interface Props {
 // ==============================
 const getTitle = (session: Session) => {
   if (session.title?.trim()) return session.title;
-
-  if (session.lastMessage) {
-    return session.lastMessage.slice(0, 25);
+  if (session.lastMessage?.trim()) {
+    return session.lastMessage.slice(0, 28);
   }
-
   return "New Chat";
 };
 
@@ -45,9 +46,35 @@ function ChatSidebar({
   activeSession,
   onSelect,
   onNewChat,
+  searchQuery = "",
 }: Props) {
   // =========================
-  // 🎯 RENDER ITEM (OPTIMIZED)
+  // FILTER (HEADER SEARCH SUPPORT)
+  // =========================
+  const filteredSessions = useMemo(() => {
+    if (!searchQuery.trim()) return sessions;
+
+    const q = searchQuery.toLowerCase();
+    return sessions.filter(
+      (s) =>
+        s.title?.toLowerCase().includes(q) ||
+        s.lastMessage?.toLowerCase().includes(q)
+    );
+  }, [sessions, searchQuery]);
+
+  // =========================
+  // SAFE NEW CHAT HANDLER (FIXED ISSUE)
+  // =========================
+  const handleNewChat = useCallback(() => {
+    try {
+      onNewChat?.();
+    } catch (err) {
+      console.warn("New chat failed:", err);
+    }
+  }, [onNewChat]);
+
+  // =========================
+  // RENDER ITEM (OPTIMIZED + MEMO STYLE)
   // =========================
   const renderItem = useCallback(
     ({ item }: { item: Session }) => {
@@ -56,20 +83,21 @@ function ChatSidebar({
       return (
         <TouchableOpacity
           onPress={() => onSelect(item.sessionId)}
-          activeOpacity={0.7}
+          activeOpacity={0.75}
           style={[
             styles.sessionItem,
             isActive && styles.activeSession,
           ]}
         >
-          {/* TITLE */}
-          <Text style={styles.title} numberOfLines={1}>
+          <Text
+            style={[styles.title, isActive && styles.activeTitle]}
+            numberOfLines={1}
+          >
             {getTitle(item)}
           </Text>
 
-          {/* LAST MESSAGE */}
           <Text style={styles.preview} numberOfLines={1}>
-            {item.lastMessage || "No messages yet"}
+            {item.lastMessage?.trim() || "No messages yet"}
           </Text>
         </TouchableOpacity>
       );
@@ -78,15 +106,13 @@ function ChatSidebar({
   );
 
   // =========================
-  // EMPTY COMPONENT
+  // EMPTY STATE
   // =========================
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
-      <Text style={styles.emptyText}>
-        No conversations yet 💬
-      </Text>
+      <Text style={styles.emptyText}>No conversations yet</Text>
       <Text style={styles.emptySub}>
-        Start a new chat to begin
+        Tap “New Chat” to start your first conversation
       </Text>
     </View>
   );
@@ -101,28 +127,28 @@ function ChatSidebar({
         <Text style={styles.heading}>Chats</Text>
       </View>
 
-      {/* NEW CHAT BUTTON */}
+      {/* NEW CHAT BUTTON (FIXED RELIABILITY) */}
       <TouchableOpacity
-        onPress={onNewChat}
+        onPress={handleNewChat}
         activeOpacity={0.85}
         style={styles.newChatBtn}
       >
         <Text style={styles.newChatText}>＋ New Chat</Text>
       </TouchableOpacity>
 
-      {/* SESSION LIST */}
+      {/* LIST */}
       <FlatList
-        data={sessions}
+        data={filteredSessions}
         keyExtractor={(item) => item.sessionId}
         renderItem={renderItem}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.list,
-          sessions.length === 0 && { flex: 1 },
+          filteredSessions.length === 0 && { flex: 1 },
         ]}
         ListEmptyComponent={renderEmpty}
-        initialNumToRender={10}
-        windowSize={5}
+        initialNumToRender={12}
+        windowSize={6}
         removeClippedSubviews
       />
     </SafeAreaView>
@@ -130,98 +156,61 @@ function ChatSidebar({
 }
 
 // ==============================
-// EXPORT (MEMO OPTIMIZED)
+// EXPORT
 // ==============================
 export default memo(ChatSidebar);
 
 // ==============================
-// STYLES
+// STYLES (MODERNIZED)
 // ==============================
 const styles = StyleSheet.create({
-  /* =========================
-     CONTAINER
-  ========================= */
   container: {
-    width: 280,
-    backgroundColor: "#0f172a",
+    width: 290,
+    backgroundColor: "#0b1220",
     borderRightWidth: 1,
     borderRightColor: "#1e293b",
   },
 
-  /* =========================
-     HEADER
-  ========================= */
   header: {
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(148,163,184,0.1)",
+    borderBottomColor: "rgba(148,163,184,0.08)",
   },
 
   heading: {
     color: "#e2e8f0",
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: "700",
   },
 
-  /* =========================
-     NEW CHAT BUTTON
-  ========================= */
   newChatBtn: {
     marginHorizontal: 12,
     marginTop: 12,
-    marginBottom: 6,
+    marginBottom: 8,
     paddingVertical: 12,
     borderRadius: 14,
     backgroundColor: "#38bdf8",
     alignItems: "center",
-
-    // shadow
-    elevation: 3,
   },
 
   newChatText: {
-    color: "#020617",
-    fontWeight: "700",
+    color: "#0b1220",
+    fontWeight: "800",
     fontSize: 14,
   },
 
-  /* =========================
-     LIST
-  ========================= */
   list: {
-    paddingTop: 4,
+    paddingTop: 6,
     paddingBottom: 20,
   },
 
-  /* =========================
-     EMPTY STATE
-  ========================= */
-  emptyContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  emptyText: {
-    color: "#94a3b8",
-    fontSize: 14,
-  },
-
-  emptySub: {
-    color: "#64748b",
-    fontSize: 12,
-    marginTop: 4,
-  },
-
-  /* =========================
-     SESSION ITEM
-  ========================= */
   sessionItem: {
     marginHorizontal: 10,
     marginVertical: 5,
     padding: 12,
     borderRadius: 14,
+    backgroundColor: "transparent",
   },
 
   activeSession: {
@@ -234,9 +223,33 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
+  activeTitle: {
+    color: "#38bdf8",
+  },
+
   preview: {
     color: "#94a3b8",
     fontSize: 12,
     marginTop: 4,
+  },
+
+  emptyContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+
+  emptyText: {
+    color: "#94a3b8",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+  emptySub: {
+    color: "#64748b",
+    fontSize: 12,
+    marginTop: 6,
+    textAlign: "center",
   },
 });

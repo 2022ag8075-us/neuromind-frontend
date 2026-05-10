@@ -40,7 +40,7 @@ interface ChatContextType {
 
   fetchSessions: (silent?: boolean) => Promise<void>;
   selectSession: (sessionId: string | null) => void;
-  createNewSession: () => Promise<string | null>;   // NEW
+  createNewSession: () => Promise<string | null>;
 
   addSession: (session: Session) => void;
   updateSession: (sessionId: string, lastMessage: string) => void;
@@ -72,6 +72,7 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,46 +81,63 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
   const retryCount = useRef(0);
   const offlineQueue = useRef<OfflineMessage[]>([]);
 
-  // ---------- Cache Helpers ----------
-  const saveCache = useCallback(async (nextSessions: Session[], nextActive: string | null) => {
+  // ==============================
+  // CACHE
+  // ==============================
+  const saveCache = useCallback(async (next: Session[], active: string | null) => {
     try {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ sessions: nextSessions, activeSessionId: nextActive }));
-    } catch (error) { console.warn("Failed to save sessions cache", error); }
+      await AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ sessions: next, activeSessionId: active })
+      );
+    } catch (e) {
+      console.warn("Cache save failed", e);
+    }
   }, []);
 
   const saveQueue = useCallback(async () => {
-    try { await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(offlineQueue.current)); } 
-    catch (error) { console.warn("Failed to save offline queue", error); }
+    try {
+      await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(offlineQueue.current));
+    } catch (e) {
+      console.warn("Queue save failed", e);
+    }
   }, []);
 
   const loadCache = useCallback(async () => {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (raw) {
+      if (raw && isMounted.current) {
         const parsed = JSON.parse(raw);
-        if (isMounted.current) {
-          setSessions(parsed.sessions || []);
-          setActiveSessionId(parsed.activeSessionId || null);
-        }
+        setSessions(parsed.sessions || []);
+        setActiveSessionId(parsed.activeSessionId || null);
       }
+
       const queueRaw = await AsyncStorage.getItem(QUEUE_KEY);
-      if (queueRaw && isMounted.current) offlineQueue.current = JSON.parse(queueRaw);
-    } catch (error) { console.warn("Failed to load cache", error); }
+      if (queueRaw) offlineQueue.current = JSON.parse(queueRaw);
+    } catch (e) {
+      console.warn("Cache load failed", e);
+    }
   }, []);
 
-  // ---------- Offline Queue ----------
+  // ==============================
+  // OFFLINE QUEUE (SAFE)
+  // ==============================
   const processQueue = useCallback(async () => {
-    if (!offlineQueue.current.length) return;
-    const queueCopy = [...offlineQueue.current];
-    for (const item of queueCopy) {
+    const queue = [...offlineQueue.current];
+    if (!queue.length) return;
+
+    for (const item of queue) {
       try {
         await API.post("/ai/unified-chat", item.payload);
-        offlineQueue.current = offlineQueue.current.filter((q) => q.id !== item.id);
+        offlineQueue.current = offlineQueue.current.filter(q => q.id !== item.id);
       } catch {
-        item.retries++;
-        if (item.retries > 3) offlineQueue.current = offlineQueue.current.filter((q) => q.id !== item.id);
+        item.retries += 1;
+        if (item.retries > 3) {
+          offlineQueue.current = offlineQueue.current.filter(q => q.id !== item.id);
+        }
       }
     }
+
     await saveQueue();
   }, [saveQueue]);
 
@@ -128,7 +146,9 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
     await saveQueue();
   }, [saveQueue]);
 
-  // ---------- Sorting ----------
+  // ==============================
+  // SORT
+  // ==============================
   const sortSessions = (list: Session[]) =>
     [...list].sort((a, b) => {
       if (a.pinned && !b.pinned) return -1;
@@ -136,7 +156,9 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
       return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime();
     });
 
-  // ---------- Clear Everything ----------
+  // ==============================
+  // CLEAR
+  // ==============================
   const clearSessions = useCallback(async () => {
     setSessions([]);
     setActiveSessionId(null);
@@ -144,14 +166,19 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
     await AsyncStorage.multiRemove([STORAGE_KEY, QUEUE_KEY]);
   }, []);
 
-  // ---------- Fetch Sessions ----------
+  // ==============================
+  // FETCH SESSIONS (FIXED STALE BUG)
+  // ==============================
   const fetchSessions = useCallback(async (silent = false) => {
     if (!isAuth || isFetching.current) return;
+
     isFetching.current = true;
     setError(null);
     if (!silent) setLoading(true);
+
     try {
       const res = await API.get("/chat/sessions");
+
       const incoming: Session[] = (res.data?.data || []).map((s: any) => ({
         sessionId: s.sessionId,
         title: s.title || "New Chat",
@@ -159,125 +186,225 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
         updatedAt: s.updatedAt,
         pinned: s.pinned || false,
       }));
+
       retryCount.current = 0;
-      if (!isMounted.current) return;
-      setSessions((prev) => {
+
+      setSessions(prev => {
         const map = new Map<string, Session>();
-        [...prev, ...incoming].forEach((s) => map.set(s.sessionId, { ...map.get(s.sessionId), ...s }));
-        const final = sortSessions(Array.from(map.values()));
-        saveCache(final, activeSessionId);
-        return final;
+
+        [...prev, ...incoming].forEach(s =>
+          map.set(s.sessionId, {
+            ...map.get(s.sessionId),
+            ...s,
+          })
+        );
+
+        const sorted = sortSessions([...map.values()]);
+
+        saveCache(sorted, activeSessionId);
+
+        return sorted;
       });
-      setActiveSessionId((prev) => prev || incoming[0]?.sessionId || null);
+
+      // SAFE ACTIVE SESSION LOGIC
+      setActiveSessionId((prev) => {
+  if (prev) return prev;
+  return incoming[0]?.sessionId || null;
+});
+
     } catch (err: any) {
-      if (err?.response?.status === 401) { logout(); return; }
+      if (err?.response?.status === 401) {
+        logout();
+        return;
+      }
+
       if (retryCount.current < 3) {
         retryCount.current++;
         setTimeout(() => fetchSessions(true), 1000 * retryCount.current);
-      } else setError("Failed to load chats");
+      } else {
+        setError("Failed to load chats");
+      }
     } finally {
       isFetching.current = false;
       if (isMounted.current) setLoading(false);
     }
   }, [isAuth, logout, activeSessionId, saveCache]);
 
-  // ---------- Session Actions (ORDER IS IMPORTANT) ----------
-  const selectSession = useCallback((id: string | null) => setActiveSessionId(id), []);
+  // ==============================
+  // SESSION ACTIONS (FIXED ORDER + SAFETY)
+  // ==============================
+  const selectSession = useCallback((id: string | null) => {
+    setActiveSessionId(id);
+  }, []);
 
   const addSession = useCallback((session: Session) => {
-    setSessions((prev) => {
-      if (prev.some((s) => s.sessionId === session.sessionId)) return prev;
-      const next = sortSessions([{ ...session, updatedAt: new Date().toISOString() }, ...prev]);
+    setSessions(prev => {
+      if (prev.some(s => s.sessionId === session.sessionId)) return prev;
+
+      const next = sortSessions([
+        { ...session, updatedAt: new Date().toISOString() },
+        ...prev,
+      ]);
+
       saveCache(next, session.sessionId);
       return next;
     });
+
     setActiveSessionId(session.sessionId);
   }, [saveCache]);
 
-  // ✅ createNewSession MUST come AFTER addSession
+  // ==============================
+  // CREATE SESSION (ROBUST)
+  // ==============================
   const createNewSession = useCallback(async (): Promise<string | null> => {
     try {
-      const res = await API.post("/chat/sessions", {}); // backend endpoint
-      const newSession = res.data?.data;
-      if (newSession?.sessionId) {
+      const res = await API.post("/chat/sessions");
+      const data = res.data?.data;
+
+      if (data?.sessionId) {
         addSession({
-          sessionId: newSession.sessionId,
+          sessionId: data.sessionId,
           title: "New Chat",
           lastMessage: "",
           updatedAt: new Date().toISOString(),
           pinned: false,
         });
-        return newSession.sessionId;
-      } else throw new Error("No sessionId from backend");
-    } catch (err) {
-      console.warn("Backend session creation failed, using local fallback", err);
-      const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+        return data.sessionId;
+      }
+
+      throw new Error("Invalid response");
+    } catch (e) {
+      console.warn("Backend failed, fallback session created", e);
+
+      const fallbackId = `local_${Date.now()}`;
+
       addSession({
-        sessionId: localId,
+        sessionId: fallbackId,
         title: "New Chat",
         lastMessage: "",
         updatedAt: new Date().toISOString(),
         pinned: false,
       });
-      return localId;
+
+      return fallbackId;
     }
   }, [addSession]);
 
-  const updateSession = useCallback((sessionId: string, lastMessage: string) => {
-    setSessions((prev) => {
-      const next = sortSessions(prev.map((s) =>
-        s.sessionId === sessionId ? { ...s, lastMessage, updatedAt: new Date().toISOString() } : s
-      ));
+  // ==============================
+  // UPDATE SESSION
+  // ==============================
+  const updateSession = useCallback((id: string, msg: string) => {
+    setSessions(prev => {
+      const next = sortSessions(
+        prev.map(s =>
+          s.sessionId === id
+            ? { ...s, lastMessage: msg, updatedAt: new Date().toISOString() }
+            : s
+        )
+      );
+
       saveCache(next, activeSessionId);
       return next;
     });
   }, [activeSessionId, saveCache]);
 
-  const togglePinSession = useCallback((sessionId: string) => {
-    setSessions((prev) => {
-      const next = sortSessions(prev.map((s) => s.sessionId === sessionId ? { ...s, pinned: !s.pinned } : s));
+  // ==============================
+  // PIN / REMOVE
+  // ==============================
+  const togglePinSession = useCallback((id: string) => {
+    setSessions(prev => {
+      const next = sortSessions(
+        prev.map(s =>
+          s.sessionId === id ? { ...s, pinned: !s.pinned } : s
+        )
+      );
+
       saveCache(next, activeSessionId);
       return next;
     });
   }, [activeSessionId, saveCache]);
 
-  const removeSession = useCallback((sessionId: string) => {
-    setSessions((prev) => {
-      const next = prev.filter((s) => s.sessionId !== sessionId);
+  const removeSession = useCallback((id: string) => {
+    setSessions(prev => {
+      const next = prev.filter(s => s.sessionId !== id);
       saveCache(next, activeSessionId);
       return next;
     });
-    setActiveSessionId((prev) => (prev === sessionId ? null : prev));
+
+    setActiveSessionId(prev => (prev === id ? null : prev));
   }, [activeSessionId, saveCache]);
 
-  // ---------- Effects ----------
+  // ==============================
+  // LIFECYCLE
+  // ==============================
   useEffect(() => {
     isMounted.current = true;
+
     const init = async () => {
       await loadCache();
       if (isAuth) {
         await fetchSessions();
         await processQueue();
-      } else await clearSessions();
+      } else {
+        await clearSessions();
+      }
     };
+
     init();
-    return () => { isMounted.current = false; isFetching.current = false; };
+
+    return () => {
+      isMounted.current = false;
+      isFetching.current = false;
+    };
   }, [isAuth, loadCache, fetchSessions, processQueue, clearSessions]);
 
-  // ---------- Memoized Context ----------
+  // ==============================
+  // CONTEXT VALUE
+  // ==============================
   const value = useMemo(() => ({
-    sessions, activeSessionId, loading, error,
-    fetchSessions, selectSession, createNewSession, addSession,
-    updateSession, removeSession, togglePinSession, enqueueOffline, clearSessions,
+    sessions,
+    activeSessionId,
+    loading,
+    error,
+
+    fetchSessions,
+    selectSession,
+    createNewSession,
+
+    addSession,
+    updateSession,
+    removeSession,
+    togglePinSession,
+
+    enqueueOffline,
+    clearSessions,
   }), [
-    sessions, activeSessionId, loading, error,
-    fetchSessions, selectSession, createNewSession, addSession,
-    updateSession, removeSession, togglePinSession, enqueueOffline, clearSessions,
+    sessions,
+    activeSessionId,
+    loading,
+    error,
+    fetchSessions,
+    selectSession,
+    createNewSession,
+    addSession,
+    updateSession,
+    removeSession,
+    togglePinSession,
+    enqueueOffline,
+    clearSessions,
   ]);
 
-  return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
+  return (
+    <ChatContext.Provider value={value}>
+      {children}
+    </ChatContext.Provider>
+  );
 };
 
+// ==============================
+// HOOK
+// ==============================
 export const useChat = () => {
   const ctx = useContext(ChatContext);
   if (!ctx) throw new Error("useChat must be used inside ChatProvider");

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { createDrawerNavigator } from "@react-navigation/drawer";
 
 import ChatScreen from "../screens/ChatScreen";
@@ -8,15 +8,23 @@ import CustomDrawer from "./CustomDrawer";
 const Drawer = createDrawerNavigator();
 
 export default function DrawerNavigator() {
+  const screenOptions = useMemo(
+    () => ({
+      headerShown: false,
+      drawerStyle: {
+        backgroundColor: "#0f172a",
+        width: 280,
+      },
+      sceneContainerStyle: {
+        backgroundColor: "#0f172a",
+      },
+    }),
+    []
+  );
+
   return (
     <Drawer.Navigator
-      screenOptions={{
-        headerShown: false,
-        drawerStyle: {
-          backgroundColor: "#0f172a",
-          width: 260,
-        },
-      }}
+      screenOptions={screenOptions}
       drawerContent={(props) => <CustomDrawer {...props} />}
     >
       <Drawer.Screen name="Chat" component={ChatScreen} />
