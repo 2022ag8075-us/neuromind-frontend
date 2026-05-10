@@ -16,18 +16,25 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.neuromind.app"
+      "bundleIdentifier": "com.neuromind.app",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Allow $(PRODUCT_NAME) to use speech recognition.",
+        "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to use the microphone."
+      }
     },
     "android": {
       "package": "com.neuromind.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0F172A"
-      }
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "extra": {
       "eas": {
-        "projectId": "d1334c4e-504c-4427-ac66-2aadb0810dc3"
+        "projectId": "719acd54-d06f-4dbb-be4d-e6dbfe178641"
       }
     },
     "plugins": [
@@ -41,6 +48,7 @@
         }
       ],
       "expo-speech-recognition"
-    ]
+    ],
+    "owner": "ai-8075"
   }
 }
