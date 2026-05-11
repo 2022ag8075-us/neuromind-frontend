@@ -67,7 +67,7 @@ export default function RegisterScreen({ navigation }: any) {
 
       navigation.reset({
         index: 0,
-        routes: [{ name: "Home" }],
+        routes: [{ name: "chat" }],
       });
     } catch (err: any) {
       console.log("Registration error:", err?.response?.data || err.message);
