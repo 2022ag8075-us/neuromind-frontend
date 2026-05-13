@@ -60,7 +60,7 @@ export default function LoginScreen({ navigation }: any) {
       // Navigate directly to Home (or main app)
       navigation.reset({
         index: 0,
-        routes: [{ name: "chat" }],
+        routes: [{ name: "Home" }],
       });
     } catch (err: any) {
       console.log("Login error:", err?.response?.data || err.message);
