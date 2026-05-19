@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { SafeAreaView } from "react-native-safe-area-context";
 import {
   View,
   Text,
@@ -8,12 +9,12 @@ import {
   Dimensions,
   ActivityIndicator,
   RefreshControl,
+  Animated,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LineChart } from "react-native-chart-kit";
-import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
-import * as Notifications from "expo-notifications";
+
+import * as Haptics from "expo-haptics";
 
 import API from "../services/api";
 import styles from "./styles/moodStyles";
@@ -40,26 +41,26 @@ export default function MoodScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastSubmit, setLastSubmit] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Animated values for mood buttons
+  const scaleAnims = useRef<Record<MoodKey, Animated.Value>>({
+    happy: new Animated.Value(1),
+    neutral: new Animated.Value(1),
+    sad: new Animated.Value(1),
+    anxious: new Animated.Value(1),
+  }).current;
+
+  const animatePress = (mood: MoodKey) => {
+    Animated.sequence([
+      Animated.timing(scaleAnims[mood], { toValue: 0.9, duration: 80, useNativeDriver: true }),
+      Animated.spring(scaleAnims[mood], { toValue: 1, friction: 3, useNativeDriver: true }),
+    ]).start();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
 
   // ---------- Daily reminder ----------
-  const setupDailyReminder = useCallback(async () => {
-    const { status } = await Notifications.requestPermissionsAsync();
-    if (status !== "granted") return;
-    await Notifications.cancelAllScheduledNotificationsAsync();
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: "🌈 Mood check-in",
-        body: "How are you feeling today? Open NeuroMind to track your mood.",
-      },
-      trigger: {
-        hour: 20,
-        minute: 0,
-        repeats: true,
-        type: Notifications.SchedulableTriggerInputTypes.CALENDAR, // ✅ FIX
-      },
-    });
-  }, []);
-
+  
   // ---------- Caching ----------
   const loadCachedHistory = async () => {
     try {
@@ -145,15 +146,15 @@ export default function MoodScreen() {
           text: "Delete",
           style: "destructive",
           onPress: async () => {
+            setDeleting(true);
             try {
-              setLoading(true);
               await API.delete(`/mood/${lastEntry.id}`);
               await fetchHistory();
               Alert.alert("Deleted", "Last mood entry removed.");
             } catch (err) {
               Alert.alert("Error", "Could not delete entry. Check your connection.");
             } finally {
-              setLoading(false);
+              setDeleting(false);
             }
           },
         },
@@ -161,34 +162,8 @@ export default function MoodScreen() {
     );
   };
 
-  // ---------- Export CSV ----------
-  const exportToCSV = async () => {
-    if (history.length === 0) {
-      Alert.alert("No data", "No mood entries to export.");
-      return;
-    }
-    let csv = "Date,Time,Mood,Score\n";
-    history.forEach((entry) => {
-      const date = new Date(entry.createdAt);
-      const dateStr = date.toLocaleDateString();
-      const timeStr = date.toLocaleTimeString();
-      const moodLabel = MOODS[entry.mood].label;
-      const score = MOODS[entry.mood].score;
-      csv += `"${dateStr}","${timeStr}","${moodLabel}",${score}\n`;
-    });
-    // ✅ FIX: Use non-null assertion (documentDirectory exists in Expo)
-    const docsDir = (FileSystem as any).documentDirectory || (FileSystem as any).cacheDirectory || '';
-const fileUri = docsDir + "mood_export.csv";
-    await FileSystem.writeAsStringAsync(fileUri, csv);
-    if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(fileUri);
-    } else {
-      Alert.alert("Export", "Sharing not available on this device");
-    }
-  };
-
-  // ---------- Stats ----------
-  const computeStats = () => {
+  // ---------- Stats (memoized) ----------
+  const stats = useMemo(() => {
     if (history.length === 0) return null;
     let totalScore = 0;
     const counts = { happy: 0, neutral: 0, sad: 0, anxious: 0 };
@@ -196,13 +171,28 @@ const fileUri = docsDir + "mood_export.csv";
       totalScore += MOODS[entry.mood].score;
       counts[entry.mood]++;
     });
-    const avg = (totalScore / history.length).toFixed(1);
-    return { avg, counts, total: history.length };
-  };
-  const stats = computeStats();
+    const avg = totalScore / history.length;
+    return { avg: avg.toFixed(1), counts, total: history.length };
+  }, [history]);
 
-  // ---------- Chart data ----------
-  const prepareChartData = () => {
+  // ---------- Trend indicator ----------
+  const trend = useMemo(() => {
+    if (history.length < 2) return null;
+    const recent = history.slice(-3);
+    const older = history.slice(-6, -3);
+    if (older.length === 0) return null;
+    const recentAvg = recent.reduce((sum, e) => sum + MOODS[e.mood].score, 0) / recent.length;
+    const olderAvg = older.reduce((sum, e) => sum + MOODS[e.mood].score, 0) / older.length;
+    if (recentAvg > olderAvg + 0.5) return { emoji: "📈", text: "Improving" };
+    if (olderAvg > recentAvg + 0.5) return { emoji: "📉", text: "Declining" };
+    return { emoji: "📊", text: "Stable" };
+  }, [history]);
+
+  // ---------- Last mood display ----------
+  const lastMood = history.length > 0 ? history[history.length - 1] : null;
+
+  // ---------- Chart data (memoized) ----------
+  const chartData = useMemo(() => {
     if (!history.length) {
       return { labels: ["No data"], datasets: [{ data: [2] }] };
     }
@@ -216,8 +206,8 @@ const fileUri = docsDir + "mood_export.csv";
     });
     const data = last7.map((entry) => MOODS[entry.mood]?.score ?? 2);
     return { labels, datasets: [{ data }] };
-  };
-  const chartData = prepareChartData();
+  }, [history]);
+
   const hasHistory = history.length > 0;
 
   // ---------- Mount ----------
@@ -225,8 +215,8 @@ const fileUri = docsDir + "mood_export.csv";
     loadCachedHistory();
     fetchHistory();
     loadLastSubmitTime();
-    setupDailyReminder();
-  }, [setupDailyReminder]);
+    
+  }, []);
 
   return (
     <ScrollView
@@ -240,28 +230,43 @@ const fileUri = docsDir + "mood_export.csv";
         Track your emotional wellbeing and spot patterns over time.
       </Text>
 
-      {/* Mood buttons */}
+      {/* Last mood badge */}
+      {lastMood && (
+        <View style={styles.lastMoodBadge}>
+          <Text style={styles.lastMoodText}>
+            Last mood: {MOODS[lastMood.mood].emoji} {MOODS[lastMood.mood].label} at{" "}
+            {new Date(lastMood.createdAt).toLocaleTimeString()}
+          </Text>
+        </View>
+      )}
+
+      {/* Mood buttons with animation */}
       <View style={styles.row}>
         {(Object.keys(MOODS) as MoodKey[]).map((mood) => {
           const { emoji, label } = MOODS[mood];
           const isActive = selectedMood === mood;
           return (
-            <TouchableOpacity
-              key={mood}
-              style={[styles.moodBtn, isActive && styles.activeMood]}
-              onPress={() => setSelectedMood(mood)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.moodEmoji}>{emoji}</Text>
-              <Text style={[styles.moodText, isActive && styles.activeMoodText]}>
-                {label}
-              </Text>
-            </TouchableOpacity>
+            <Animated.View key={mood} style={{ transform: [{ scale: scaleAnims[mood] }] }}>
+              <TouchableOpacity
+                style={[styles.moodBtn, isActive && styles.activeMood]}
+                onPress={() => {
+                  setSelectedMood(mood);
+                  animatePress(mood);
+                }}
+                activeOpacity={0.7}
+                accessibilityLabel={`Select mood ${label}`}
+              >
+                <Text style={styles.moodEmoji}>{emoji}</Text>
+                <Text style={[styles.moodText, isActive && styles.activeMoodText]}>
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
           );
         })}
       </View>
 
-      {/* Action row */}
+      {/* Action row (without Export) */}
       <View style={styles.actionRow}>
         <TouchableOpacity
           style={[styles.submitBtn, loading && { opacity: 0.7 }]}
@@ -271,16 +276,12 @@ const fileUri = docsDir + "mood_export.csv";
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>Save Mood</Text>}
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.secondaryBtn} onPress={exportToCSV}>
-          <Text style={styles.secondaryBtnText}>📤 Export</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.secondaryBtn} onPress={deleteLastEntry}>
-          <Text style={[styles.secondaryBtnText, { color: "#f87171" }]}>🗑️ Delete last</Text>
+        <TouchableOpacity style={styles.secondaryBtn} onPress={deleteLastEntry} disabled={deleting}>
+          {deleting ? <ActivityIndicator color="#fff" size="small" /> : <Text style={[styles.secondaryBtnText, { color: "#f87171" }]}>🗑️ Delete last</Text>}
         </TouchableOpacity>
       </View>
 
-      {/* Stats card */}
+      {/* Stats card with trend */}
       {stats && (
         <View style={styles.statsCard}>
           <Text style={styles.statsTitle}>📊 Overall Mood</Text>
@@ -288,6 +289,11 @@ const fileUri = docsDir + "mood_export.csv";
             Average score: {stats.avg} / 4
             <Text style={{ fontSize: 14, color: "#94a3b8" }}>  (Based on {stats.total} entries)</Text>
           </Text>
+          {trend && (
+            <Text style={styles.trendText}>
+              {trend.emoji} Trend: {trend.text}
+            </Text>
+          )}
           <View style={styles.statsDistribution}>
             <Text>😊 Happy: {stats.counts.happy}</Text>
             <Text>😐 Neutral: {stats.counts.neutral}</Text>

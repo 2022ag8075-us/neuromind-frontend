@@ -129,6 +129,24 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     marginBottom: 12,
   },
+  lastMoodBadge: {
+  backgroundColor: "#1e293b",
+  borderRadius: 20,
+  paddingVertical: 6,
+  paddingHorizontal: 12,
+  alignSelf: "center",
+  marginVertical: 8,
+},
+lastMoodText: {
+  color: "#e2e8f0",
+  fontSize: 12,
+},
+trendText: {
+  color: "#38bdf8",
+  fontSize: 14,
+  marginBottom: 8,
+  textAlign: "center",
+},
 
   statsDistribution: {
     flexDirection: "row",

@@ -16,9 +16,11 @@
     "@react-native-clipboard/clipboard": "^1.16.3",
     "@react-native-community/netinfo": "11.4.1",
     "@react-navigation/drawer": "^7.9.8",
-    "@react-navigation/native": "^7.0.0",
+    "@react-navigation/native": "^7.2.4",
     "@react-navigation/native-stack": "^7.0.0",
+    "@shopify/flash-list": "^2.0.2",
     "axios": "^1.6.0",
+    "dompurify": "^3.4.3",
     "expo": "~54.0.0",
     "expo-asset": "~12.0.13",
     "expo-audio": "~1.1.1",
@@ -29,6 +31,7 @@
     "expo-dev-client": "~6.0.21",
     "expo-file-system": "~19.0.22",
     "expo-haptics": "~15.0.8",
+    "expo-image-manipulator": "^55.0.16",
     "expo-image-picker": "~17.0.11",
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.12",
@@ -41,10 +44,12 @@
     "metro-runtime": "^0.84.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "react-error-boundary": "^6.1.1",
     "react-native": "0.81.5",
     "react-native-chart-kit": "^6.12.0",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-markdown-display": "^7.0.2",
+    "react-native-mmkv": "^4.3.1",
     "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
@@ -53,6 +58,7 @@
     "react-native-worklets": "0.5.1"
   },
   "devDependencies": {
+    "@types/dompurify": "^3.0.5",
     "@types/react": "~19.1.10",
     "typescript": "~5.9.2"
   }

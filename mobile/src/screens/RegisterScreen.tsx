@@ -65,10 +65,10 @@ export default function RegisterScreen({ navigation }: any) {
       await clearSessions();
       Alert.alert("Success 🎉", "Account created successfully");
 
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "Home" }],
-      });
+      // navigation.reset({
+      //   index: 0,
+      //   routes: [{ name: "Chat" }],
+      // });
     } catch (err: any) {
       console.log("Registration error:", err?.response?.data || err.message);
       const message =

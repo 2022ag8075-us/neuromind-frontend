@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { SafeAreaView } from "react-native-safe-area-context";
 import {
   Text,
   TextInput,
@@ -58,10 +59,10 @@ export default function LoginScreen({ navigation }: any) {
       await clearSessions(); // remove old chat data when logging into a different account
 
       // Navigate directly to Home (or main app)
-      navigation.reset({
-        index: 0,
-        routes: [{ name: "Home" }],
-      });
+      // navigation.reset({
+      //   index: 0,
+      //   routes: [{ name: "Chat" }],
+      // });
     } catch (err: any) {
       console.log("Login error:", err?.response?.data || err.message);
       const message =

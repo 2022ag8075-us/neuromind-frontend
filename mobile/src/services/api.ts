@@ -12,7 +12,7 @@ import { Platform } from "react-native";
 /* =========================
    🌐 BASE URL
 ========================= */
-const LOCAL_IP = "192.168.0.102"; // your laptop IP
+const LOCAL_IP = "192.168.0.106"; // your laptop IP
 
 
 const getBaseURL = (): string => {
